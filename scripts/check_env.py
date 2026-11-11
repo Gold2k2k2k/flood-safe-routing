@@ -75,7 +75,11 @@ def check_sample_data() -> bool:
             continue
         try:
             data = json.loads(fp.read_text(encoding="utf-8"))
-            count = len(data.get("features", data)) if isinstance(data, (dict, list)) else 0
+            count = (
+                len(data.get("features", []))
+                if isinstance(data, dict)
+                else (len(data) if isinstance(data, list) else 0)
+            )
             print(f"[OK] {fp.relative_to(ROOT_DIR)} (valid JSON, {count} records)")
         except Exception as exc:
             print(f"[FAIL] Invalid JSON in {fp.relative_to(ROOT_DIR)}: {exc}")
