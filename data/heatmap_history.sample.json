@@ -1,0 +1,22 @@
+[
+  {
+    "zone_id": "hcm_binh_thanh_nhc",
+    "city": "TP.HCM",
+    "district": "Bình Thạnh",
+    "lat": 10.7895,
+    "lng": 106.7124,
+    "flood_frequency_30d": 12,
+    "avg_severity": 2.3,
+    "peak_trigger": "high_tide_and_rain"
+  },
+  {
+    "zone_id": "hn_thanh_xuan_nt",
+    "city": "Hà Nội",
+    "district": "Thanh Xuân",
+    "lat": 20.9912,
+    "lng": 105.8027,
+    "flood_frequency_30d": 8,
+    "avg_severity": 1.9,
+    "peak_trigger": "heavy_rain"
+  }
+]

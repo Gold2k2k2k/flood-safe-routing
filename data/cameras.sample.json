@@ -1,0 +1,22 @@
+[
+  {
+    "camera_id": "cam_hcm_001",
+    "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 10.7858,
+    "lng": 106.7082,
+    "road_segment_id": "seg_hcm_nhc_01"
+  },
+  {
+    "camera_id": "cam_hn_001",
+    "name": "Nút giao Nguyễn Trãi - Khuất Duy Tiến",
+    "city": "Hà Nội",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 20.9912,
+    "lng": 105.8027,
+    "road_segment_id": "seg_hn_nt_01"
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "event_id": "evt_001",
+        "source": "camera_ai",
+        "camera_id": "cam_hcm_001",
+        "severity_level": 2,
+        "estimated_depth_cm": "25-40",
+        "passable_for_motorbike": false,
+        "confidence": 0.91,
+        "status": "active",
+        "updated_at": "2026-11-11T10:00:00+07:00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [106.7082, 10.7858]
+      }
+    }
+  ]
+}
