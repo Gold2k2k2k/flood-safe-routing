@@ -111,8 +111,10 @@ Trả về danh sách các vùng ngập đang kích hoạt (dùng cho khởi t�
         "estimated_depth_cm": "20-35",
         "passable_for_motorbike": false,
         "confidence": 0.91,
+        "vision_model": "gemini-3.8-flash",
         "status": "active",
-        "updated_at": "2026-11-11T10:00:00+07:00"
+        "updated_at": "2026-11-11T10:00:00+07:00",
+        "ttl_expires_at": "2026-11-11T10:15:00+07:00"
       }
     ]
   }
@@ -177,7 +179,7 @@ Tính toán lộ trình an toàn cho xe máy (`TWO_WHEELER`), tự động kiể
   ```
 
 ### 3.5. `GET /api/heatmap`
-Lấy dữ liệu tổng hợp tần suất ngập phục vụ `google.maps.visualization.HeatmapLayer`.
+Lấy dữ liệu tổng hợp tần suất ngập phục vụ lớp bản đồ nhiệt (`HeatmapOverlay` trên `google.maps.OverlayView` Canvas).
 - **Response `200 OK`:**
   ```json
   {
@@ -192,6 +194,61 @@ Lấy dữ liệu tổng hợp tần suất ngập phục vụ `google.maps.visu
         "flood_frequency_30d": 12,
         "avg_severity": 2.3,
         "weight": 27.6
+      }
+    ]
+  }
+  ```
+
+### 3.6. `GET /api/cameras`
+Lấy danh sách các điểm camera giao thông đang theo dõi (kèm tọa độ GPS và tên tuyến đường).
+- **Response `200 OK`:**
+  ```json
+  {
+    "count": 2,
+    "items": [
+      {
+        "camera_id": "cam_hcm_001",
+        "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+        "city": "TP.HCM",
+        "source": "public_traffic_camera",
+        "feed_url": "https://camera.0511.vn",
+        "lat": 10.7858,
+        "lng": 106.7082,
+        "road_segment_id": "seg_hcm_nhc_01"
+      }
+    ]
+  }
+  ```
+
+### 3.7. `POST /api/cameras/poll`
+Kích hoạt kiểm tra snapshot/frame mới nhất từ danh sách camera (hoặc một tập `camera_ids` chỉ định), đưa qua `ai-vision` phân tích và đồng bộ vào Firestore nếu phát hiện ngập (`severity_level >= 1`).
+- **Request (`application/json`, tùy chọn body rỗng):**
+  ```json
+  {
+    "camera_ids": ["cam_hcm_001"],
+    "mock_severity_hint": 2
+  }
+  ```
+- **Response `200 OK`:**
+  ```json
+  {
+    "polled_count": 1,
+    "flooded_count": 1,
+    "results": [
+      {
+        "camera_id": "cam_hcm_001",
+        "frame_source": "mock_fallback",
+        "analysis": {
+          "flood_detected": true,
+          "severity_level": 2,
+          "visual_cue": "Nước ngập quá mép lề đường và chạm khoảng nửa bánh xe máy",
+          "estimated_depth_cm": "20-35",
+          "passable_for_motorbike": false,
+          "confidence": 0.91,
+          "vision_model": "gemini-3.8-flash",
+          "analyzed_at": "2026-11-11T10:30:00+00:00"
+        },
+        "broadcasted_to_firestore": false
       }
     ]
   }

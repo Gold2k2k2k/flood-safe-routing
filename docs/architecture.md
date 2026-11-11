@@ -48,4 +48,4 @@ Vì **Google Routes API** (`computeRoutes`) không hỗ trợ truyền trực ti
 ## 3. Flood Frequency Heatmap (Dữ liệu quy hoạch đô thị)
 
 - Mọi sự kiện ngập đã được Gemini xác nhận từ `flood_events_history` (gồm `lat`, `lng`, `severity_level`, `duration_minutes`, `created_at`) được tổng hợp theo tần suất và trọng số mức ngập.
-- Frontend dùng **`google.maps.visualization.HeatmapLayer`** (thuộc Maps JS API) để hiển thị bản đồ nhiệt tần suất ngập trực tiếp trên nền bản đồ, phục vụ cơ quan quản lý đô thị đánh giá điểm nóng ngập lụt để cải tạo hạ tầng thoát nước.
+- Frontend dùng **`HeatmapOverlay` (`google.maps.OverlayView` Canvas)** trên nền Maps JS API v3.65+ (hoặc tùy chọn `deck.gl` `HeatmapLayer` vì `google.maps.visualization.HeatmapLayer` đã bị Google ngừng hỗ trợ từ v3.65) để hiển thị bản đồ nhiệt tần suất ngập trực tiếp trên nền bản đồ, phục vụ cơ quan quản lý đô thị đánh giá điểm nóng ngập lụt để cải tạo hạ tầng thoát nước.

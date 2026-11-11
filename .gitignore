@@ -12,6 +12,7 @@ build/
 .next/
 out/
 .vite/
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

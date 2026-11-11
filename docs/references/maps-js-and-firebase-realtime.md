@@ -1,13 +1,13 @@
 # Deep Reference: Google Maps JS API (`@vis.gl/react-google-maps`) & Firebase Real-time Sync
 
-This document specifies verified frontend integration patterns for **Google Maps JavaScript API**, **`HeatmapLayer`**, **Firebase v10 Modular Firestore (`onSnapshot`)**, and automatic **Live Rerouting** on the client.
+This document specifies verified frontend integration patterns for **Google Maps JavaScript API v3.65+**, a **Maps JS `OverlayView` Canvas Thermal Heatmap**, **Firebase v10 Modular Firestore (`onSnapshot`)**, and automatic **Live Rerouting** on the client.
 
 ---
 
 ## 1. `@vis.gl/react-google-maps` Setup & Map Libraries
 
 ### Provider & Map Container
-Always load `visualization`, `geometry`, and `places` upfront on `<APIProvider>` so `HeatmapLayer` and polyline utilities are available cleanly. Remember that `<AdvancedMarker>` requires a `mapId` (for rapid hackathon demos without a custom Cloud Map Style ID, you can use Google's documented demo Map ID `"DEMO_MAP_ID"`).
+Load `geometry` and `places` on `<APIProvider>` (`visualization` was deprecated and `google.maps.visualization.HeatmapLayer` was removed in Maps JS API v3.65 — do **NOT** call `HeatmapLayer`). Always specify a `mapId` (e.g., `"DEMO_MAP_ID"` for rapid prototyping) when using `<AdvancedMarker>`.
 
 ```tsx
 import {
@@ -15,94 +15,26 @@ import {
   Map,
   AdvancedMarker,
   Pin,
-  Polyline,
-  Circle,
   useMap,
   useMapsLibrary
 } from "@vis.gl/react-google-maps";
 ```
 
-> **Version Resilience Note:** If a pinned minor version or wrapper does not export `<Polyline>` / `<Circle>` directly, or if you need fine-grained imperative control over `setPath` / `setMap(null)`, instantiate `google.maps.Polyline` and `google.maps.Circle` inside `useEffect` using `const map = useMap()` and `const mapsLib = useMapsLibrary("maps")`.
-
-### Declarative Camera Markers & Red Flood Circles
-
-```tsx
-{zones.map((zone) => {
-  const isBlocked = zone.severity_level >= 2;
-  const color = isBlocked ? "#ef4444" : "#eab308";
-  return (
-    <React.Fragment key={zone.event_id}>
-      <Circle
-        center={{ lat: zone.lat, lng: zone.lng }}
-        radius={zone.radius_meters}
-        fillColor={color}
-        fillOpacity={0.32}
-        strokeColor={color}
-        strokeWeight={2}
-      />
-      <AdvancedMarker
-        position={{ lat: zone.lat, lng: zone.lng }}
-        title={`${zone.location_name ?? zone.event_id} (Level ${zone.severity_level})`}
-      >
-        <Pin
-          background={color}
-          borderColor="#ffffff"
-          glyphColor="#ffffff"
-        />
-      </AdvancedMarker>
-    </React.Fragment>
-  );
-})}
-```
+> **Version Resilience Note:** Instantiate `mapsLib.Polyline` and `mapsLib.Circle` inside `useEffect` via `useMap()` + `useMapsLibrary("maps")`, and always call `.setMap(null)` on cleanup. This pattern works reliably across all `@vis.gl/react-google-maps` 1.x versions.
 
 ---
 
-## 2. `HeatmapLayer` Pattern (`useMapsLibrary('visualization')`)
+## 2. Maps JS v3.65+ Flood Heatmap Pattern (`google.maps.OverlayView` Canvas)
 
-`HeatmapLayer` is not a built-in React component in `@vis.gl/react-google-maps`. Load it via `useMapsLibrary("visualization")` and bind it to `useMap()`, taking care to clean up with `heatmap.setMap(null)` on toggle/unmount to prevent duplicate stacked layers on re-render.
+> **CRITICAL DEPRECATION GUARD:** Google removed `google.maps.visualization.HeatmapLayer` in Maps JS API **v3.65** (May 2026). Calling `new visualizationLib.HeatmapLayer(...)` fails TypeScript compilation in `@types/google.maps` and throws a runtime error in Maps JS v3.65+.
 
-```tsx
-import { useEffect, useMemo } from "react";
-import { useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
-import type { HeatmapPoint } from "../types/flood";
+Instead, `frontend/src/components/HeatmapOverlay.tsx` renders a **viewport-bounded HTML5 Canvas thermal overlay** inside `google.maps.OverlayView` (`overlayLayer` pane), or you can optionally pair `@deck.gl/google-maps` (`GoogleMapsOverlay`) + `@deck.gl/aggregation-layers` (`HeatmapLayer`).
 
-interface FloodHeatmapLayerProps {
-  visible: boolean;
-  points: HeatmapPoint[];
-}
-
-export function FloodHeatmapLayer({ visible, points }: FloodHeatmapLayerProps) {
-  const map = useMap();
-  const visualizationLib = useMapsLibrary("visualization");
-
-  const weightedLocations = useMemo(() => {
-    if (!visualizationLib || !points.length) return [];
-    return points.map((pt) => ({
-      location: new google.maps.LatLng(pt.lat, pt.lng),
-      weight: pt.weight || pt.flood_frequency_30d * pt.avg_severity
-    }));
-  }, [visualizationLib, points]);
-
-  useEffect(() => {
-    if (!visualizationLib || !map || !visible || weightedLocations.length === 0) {
-      return;
-    }
-
-    const heatmap = new visualizationLib.HeatmapLayer({
-      data: weightedLocations,
-      map,
-      radius: 45,
-      opacity: 0.75
-    });
-
-    return () => {
-      heatmap.setMap(null);
-    };
-  }, [visualizationLib, map, visible, weightedLocations]);
-
-  return null;
-}
-```
+### Canvas `OverlayView` Highlights (`HeatmapOverlay.tsx`)
+1. Guard instantiation on `if (!map || !mapsLib || !visible || points.length === 0) return;`.
+2. In `onAdd()`, create `<canvas style="position:absolute;pointer-events:none">` and attach to `this.getPanes()?.overlayLayer`.
+3. In `draw()`, project `map.getBounds()` (`getSouthWest()`, `getNorthEast()`) via `projection.fromLatLngToDivPixel(...)` to size the canvas strictly to the visible viewport (`+ 2 * radiusPx`), then render radial weighted gradients (`rgba(239,68,68)` -> `rgba(245,158,11)` -> transparent) for each `HeatmapPoint`.
+4. In `onRemove()` and React `useEffect` cleanup, remove the canvas DOM node and call `overlay.setMap(null)`.
 
 ---
 
@@ -111,70 +43,71 @@ export function FloodHeatmapLayer({ visible, points }: FloodHeatmapLayerProps) {
 Initialize Firebase **only** when `envConfig.hasFirebaseConfig` is `true` so contributors without Firebase credentials never hit `FirebaseError: invalid-api-key` at import time.
 
 ```typescript
-import { initializeApp, getApps } from "firebase/app";
+import { getApps, initializeApp } from "firebase/app";
 import {
-  getFirestore,
   collection,
+  getFirestore,
+  onSnapshot,
   query,
   where,
-  onSnapshot,
-  type QuerySnapshot,
-  type DocumentData
+  type DocumentData,
+  type QuerySnapshot
 } from "firebase/firestore";
 import { envConfig } from "../config/env";
 import { fetchFloodZones } from "./api";
 import type { FloodZoneItem } from "../types/flood";
 
 export function subscribeToActiveFloodZones(
-  onUpdate: (zones: FloodZoneItem[]) => void
+  onUpdate: (zones: FloodZoneItem[]) => void,
+  onError?: (err: Error) => void
 ): () => void {
   if (!envConfig.hasFirebaseConfig) {
-    // Polling fallback against FastAPI backend (works with USE_MOCK_FALLBACK=true)
     let active = true;
     const poll = async () => {
       try {
         const items = await fetchFloodZones();
         if (active) onUpdate(items);
-      } catch {
-        // Backend still starting up
+      } catch (err) {
+        if (onError && err instanceof Error) onError(err);
       }
     };
-    poll();
-    const timer = window.setInterval(poll, 5000);
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
   }
 
-  const app = getApps().length
-    ? getApps()[0]
-    : initializeApp(envConfig.firebase);
+  const app = getApps().length ? getApps()[0] : initializeApp(envConfig.firebase);
   const db = getFirestore(app);
-
-  const q = query(
-    collection(db, "active_flood_zones"),
-    where("status", "==", "active")
-  );
+  const q = query(collection(db, "active_flood_zones"), where("status", "==", "active"));
 
   return onSnapshot(
     q,
     (snapshot: QuerySnapshot<DocumentData>) => {
-      const zones: FloodZoneItem[] = snapshot.docs.map((doc) => {
+      const nowMs = Date.now();
+      const zones: FloodZoneItem[] = [];
+      snapshot.forEach((doc) => {
         const data = doc.data();
-        return {
+        const ttl = data.ttl_expires_at as string | undefined;
+        if (ttl) {
+          const ttlMs = Date.parse(ttl);
+          if (!Number.isNaN(ttlMs) && ttlMs <= nowMs) return;
+        }
+        zones.push({
           ...(data as FloodZoneItem),
-          event_id: data.event_id || doc.id,
+          event_id: (data.event_id as string) || doc.id,
           updated_at:
             typeof data.updated_at?.toDate === "function"
               ? data.updated_at.toDate().toISOString()
-              : data.updated_at
-        };
+              : (data.updated_at as string)
+        });
       });
       onUpdate(zones);
     },
-    (err) => {
-      console.error("Firestore onSnapshot error:", err);
+    (error) => {
+      if (onError) onError(error);
     }
   );
 }
@@ -182,9 +115,9 @@ export function subscribeToActiveFloodZones(
 
 ---
 
-## 4. Automatic Live Rerouting Trigger in React
+## 4. Automatic Live Rerouting Trigger in React (`useAutoReroute.ts`)
 
 When Firestore pushes a new `active_flood_zones` list while a driver already has an active `routeResult`:
-1. Track the current `origin` and `destination` in component state.
-2. Whenever `zones` updates (specifically when a zone with `severity_level >= 2` is added whose `event_id` is **not** already in `routeResult.avoided_flood_zone_ids`), check client-side proximity against `routeResult.route_coordinates` (or trigger `requestSafeRoute({ origin, destination, travel_mode: "TWO_WHEELER", avoid_flood_zones: true })` automatically).
-3. Render the old flooded path briefly as a dashed red polyline (`strokeOpacity: 0, icons: [dashSymbol]`) alongside the newly computed green safe polyline (`#22c55e`) so judges visually see the instant detour.
+1. Compare incoming active zones (`severity_level >= 2`) against `routeResult.avoided_flood_zone_ids`.
+2. If any new un-avoided severe zone appears, `useAutoReroute` automatically invokes `requestSafeRoute({ origin, destination, travel_mode: "TWO_WHEELER", avoid_flood_zones: true })`.
+3. `FloodMap` re-renders the safe polyline in green (`#22c55e`) when `routeResult.rerouted === true` alongside red flood circles (`#ef4444`).

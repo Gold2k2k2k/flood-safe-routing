@@ -1,4 +1,4 @@
-"""Backend configuration and environment flags."""
+"""Backend configuration, path resolution, and environment flags."""
 
 from __future__ import annotations
 
@@ -18,19 +18,52 @@ def _has_real_value(val: str | None) -> bool:
 
 
 class Settings:
-    PORT: int = int(os.getenv("PORT", "8000"))
-    USE_MOCK_FALLBACK: bool = os.getenv("USE_MOCK_FALLBACK", "true").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-    GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
-    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")
-    GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv(
-        "GOOGLE_APPLICATION_CREDENTIALS", str(ROOT_DIR / "serviceAccountKey.json")
-    )
+    @property
+    def PORT(self) -> int:
+        return int(os.getenv("PORT", "8000"))
+
+    @property
+    def USE_MOCK_FALLBACK(self) -> bool:
+        return os.getenv("USE_MOCK_FALLBACK", "true").lower() in ("true", "1", "yes")
+
+    @property
+    def GEMINI_API_KEY(self) -> str:
+        return os.getenv("GEMINI_API_KEY", "")
+
+    @property
+    def GEMINI_MODEL(self) -> str:
+        return os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+    @property
+    def GOOGLE_MAPS_API_KEY(self) -> str:
+        return os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+    @property
+    def FIREBASE_PROJECT_ID(self) -> str:
+        return os.getenv("FIREBASE_PROJECT_ID", "")
+
+    @property
+    def GOOGLE_APPLICATION_CREDENTIALS(self) -> str:
+        return os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./serviceAccountKey.json")
+
+    @property
+    def FLOOD_ALERT_THRESHOLD(self) -> float:
+        return float(os.getenv("FLOOD_ALERT_THRESHOLD", "0.65"))
+
+    @property
+    def CAMERA_POLL_INTERVAL_SECONDS(self) -> int:
+        return int(os.getenv("CAMERA_POLL_INTERVAL_SECONDS", "30"))
+
+    @property
+    def FLOOD_ZONE_TTL_MINUTES(self) -> int:
+        return int(os.getenv("FLOOD_ZONE_TTL_MINUTES", "15"))
+
+    @property
+    def resolved_credentials_path(self) -> Path:
+        sa_file = Path(self.GOOGLE_APPLICATION_CREDENTIALS)
+        if not sa_file.is_absolute():
+            sa_file = (ROOT_DIR / sa_file).resolve()
+        return sa_file
 
     @property
     def gemini_configured(self) -> bool:
@@ -42,10 +75,9 @@ class Settings:
 
     @property
     def firebase_configured(self) -> bool:
-        sa_file = Path(self.GOOGLE_APPLICATION_CREDENTIALS)
-        if not sa_file.is_absolute():
-            sa_file = ROOT_DIR / sa_file
-        return sa_file.exists() and _has_real_value(self.FIREBASE_PROJECT_ID)
+        return self.resolved_credentials_path.exists() and _has_real_value(
+            self.FIREBASE_PROJECT_ID
+        )
 
 
 settings = Settings()

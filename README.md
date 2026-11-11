@@ -99,7 +99,7 @@ flowchart LR
     GEM -->|"JSON Severity + Lat/Lng"| FB[("Firebase / Google Cloud\nFirestore Real-time + Storage")]
     FB -->|"Real-time Listener (onSnapshot)"| WEB["Web App\n(Google Maps JS API)"]
     FB -->|"Active Flood Coordinates"| ROUTES["Google Routes API\n(Dynamic Rerouting / TWO_WHEELER)"]
-    FB -->|"Historical Flood Logs"| HEAT["Google Maps HeatmapLayer\n(Tần suất ngập đô thị)"]
+    FB -->|"Historical Flood Logs"| HEAT["Maps JS OverlayView Canvas\n(Bản đồ nhiệt tần suất ngập)"]
     ROUTES --> WEB
     HEAT --> WEB
 ```

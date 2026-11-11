@@ -20,7 +20,7 @@ Tài liệu này hướng dẫn từng bước khởi tạo 3 tài nguyên Googl
    - **Places API (New)** (Gợi ý địa điểm khi người dùng nhập điểm đi / điểm đến).
 3. Vào **APIs & Services -> Credentials -> Create Credentials -> API key**:
    - Điền vào `GOOGLE_MAPS_API_KEY` (dùng cho Backend gọi Routes API) và `VITE_GOOGLE_MAPS_API_KEY` (dùng cho Frontend hiển thị bản đồ).
-   - *Lưu ý:* Khi nhúng script Maps JS API ở Frontend, nhớ thêm tham số `libraries=visualization,geometry,places` để sử dụng được `HeatmapLayer` và tính toán hình học.
+   - *Lưu ý:* Khi nhúng Maps JS API v3.65+ ở Frontend, cấu hình `libraries={["geometry", "places"]}` (lớp Heatmap được vẽ qua `google.maps.OverlayView` Canvas trong `HeatmapOverlay.tsx` do `visualization.HeatmapLayer` đã bị Google ngừng hỗ trợ từ v3.65).
 
 ### 1.3. Thiết lập Firebase Project (`Firestore` & `Storage`)
 1. Truy cập https://console.firebase.google.com/ -> **Add project** (liên kết cùng Google Cloud project ở trên).

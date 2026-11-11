@@ -60,15 +60,28 @@ def check_runtime() -> bool:
     return True
 
 
-def check_sample_data() -> bool:
-    print("\n=== 2. Sample Data & Schema Integrity ===")
-    files = [
+def check_structure_and_data() -> bool:
+    print("\n=== 2. Required Contracts, Agent Docs & Sample Data ===")
+    required_files = [
+        ROOT_DIR / "AGENTS.md",
+        ROOT_DIR / "docs" / "api-and-data-contract.md",
+        ROOT_DIR / "frontend" / "src" / "vite-env.d.ts",
+        ROOT_DIR / "frontend" / "src" / "types" / "flood.ts",
+    ]
+    all_ok = True
+    for rf in required_files:
+        if rf.exists():
+            print(f"[OK] {rf.relative_to(ROOT_DIR)}")
+        else:
+            print(f"[FAIL] Missing required file: {rf.relative_to(ROOT_DIR)}")
+            all_ok = False
+
+    sample_files = [
         ROOT_DIR / "data" / "cameras.sample.json",
         ROOT_DIR / "data" / "flood_events.sample.geojson",
         ROOT_DIR / "data" / "heatmap_history.sample.json",
     ]
-    all_ok = True
-    for fp in files:
+    for fp in sample_files:
         if not fp.exists():
             print(f"[FAIL] Missing sample file: {fp.relative_to(ROOT_DIR)}")
             all_ok = False
@@ -104,8 +117,11 @@ def check_env_config() -> None:
     has_maps = is_real_key(merged.get("GOOGLE_MAPS_API_KEY")) or is_real_key(
         merged.get("VITE_GOOGLE_MAPS_API_KEY")
     )
-    sa_path = ROOT_DIR / merged.get("GOOGLE_APPLICATION_CREDENTIALS", "serviceAccountKey.json")
-    has_firebase = sa_path.exists() or is_real_key(merged.get("FIREBASE_PROJECT_ID"))
+    sa_rel = merged.get("GOOGLE_APPLICATION_CREDENTIALS", "serviceAccountKey.json")
+    sa_path = Path(sa_rel)
+    if not sa_path.is_absolute():
+        sa_path = (ROOT_DIR / sa_path).resolve()
+    has_firebase = sa_path.exists() and is_real_key(merged.get("FIREBASE_PROJECT_ID"))
 
     print(f"  - USE_MOCK_FALLBACK : {mock_fallback}")
     print(f"  - GEMINI_MODEL      : {gemini_model}")
@@ -123,7 +139,7 @@ def check_env_config() -> None:
 def main() -> int:
     print("Flood-Safe Routing — Contributor Environment Check\n")
     ok_runtime = check_runtime()
-    ok_data = check_sample_data()
+    ok_data = check_structure_and_data()
     check_env_config()
 
     if ok_runtime and ok_data:

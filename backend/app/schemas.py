@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +27,12 @@ class FloodZoneItem(BaseModel):
     vision_model: str = "gemini-3.8-flash"
     status: str = "active"
     updated_at: str
+    ttl_expires_at: str | None = None
+
+
+class FloodZonesListResponse(BaseModel):
+    count: int
+    items: list[FloodZoneItem]
 
 
 class CrowdsourcingReportRequest(BaseModel):
@@ -35,6 +42,12 @@ class CrowdsourcingReportRequest(BaseModel):
     reporter_note: str = ""
     image_base64: str | None = None
     mock_severity_hint: int = Field(default=2, ge=0, le=3)
+
+
+class CrowdsourcingReportResponse(BaseModel):
+    report_id: str
+    analysis: dict[str, Any]
+    broadcasted_to_firestore: bool
 
 
 class RouteRequest(BaseModel):
@@ -53,3 +66,54 @@ class RouteResponse(BaseModel):
     encoded_polyline: str
     route_coordinates: list[LatLng]
     warning_message: str | None = None
+
+
+class CameraItem(BaseModel):
+    camera_id: str
+    name: str
+    city: str
+    source: str = "public_traffic_camera"
+    feed_url: str
+    lat: float
+    lng: float
+    road_segment_id: str | None = None
+
+
+class CameraListResponse(BaseModel):
+    count: int
+    items: list[CameraItem]
+
+
+class CameraPollRequest(BaseModel):
+    camera_ids: list[str] | None = None
+    mock_severity_hint: int = Field(default=2, ge=0, le=3)
+
+
+class CameraPollResultItem(BaseModel):
+    camera_id: str
+    frame_source: str
+    analysis: dict[str, Any]
+    broadcasted_to_firestore: bool
+
+
+class CameraPollResponse(BaseModel):
+    polled_count: int
+    flooded_count: int
+    results: list[CameraPollResultItem]
+
+
+class HeatmapPointItem(BaseModel):
+    zone_id: str
+    city: str
+    district: str
+    lat: float
+    lng: float
+    flood_frequency_30d: int
+    avg_severity: float
+    weight: float
+    peak_trigger: str | None = None
+
+
+class HeatmapResponse(BaseModel):
+    count: int
+    items: list[HeatmapPointItem]

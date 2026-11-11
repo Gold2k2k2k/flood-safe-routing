@@ -1,6 +1,6 @@
 # Data — Schemas & Sample Datasets
 
-Thư mục lưu trữ schema chuẩn, tọa độ các điểm camera mẫu và dữ liệu mẫu dùng để seed **Firebase Firestore** và kiểm thử **Google Maps HeatmapLayer / Dynamic Rerouting** trong bản Demo 24h.
+Thư mục lưu trữ schema chuẩn, tọa độ các điểm camera mẫu và dữ liệu mẫu dùng để seed **Firebase Firestore** và kiểm thử **Flood Heatmap Overlay / Dynamic Rerouting** trong bản Demo 24h.
 
 ## Cấu trúc hiện có
 - `cameras.sample.json` — Danh sách camera giao thông kèm tọa độ `(lat, lng)` và tên tuyến đường.

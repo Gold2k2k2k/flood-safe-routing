@@ -9,7 +9,7 @@ Tài liệu này quy định lộ trình triển khai từng bước từ khâu 
 ### Thành viên 1 — Frontend & Google Maps Engineer (`frontend/`)
 - **Kỹ năng cần thiết:**
   - React 18+, Vite, TypeScript, Tailwind CSS.
-  - Tích hợp **Google Maps JavaScript API** (`@vis.gl/react-google-maps` hoặc `@react-google-maps/api`): hiển thị marker camera, vòng tròn cảnh báo vùng ngập đỏ (`Circle` / `Polygon`), vẽ đường đi (`Polyline` giải mã từ `encodedPolyline`), và lớp bản đồ nhiệt (`google.maps.visualization.HeatmapLayer`).
+  - Tích hợp **Google Maps JavaScript API v3.65+** (`@vis.gl/react-google-maps`): hiển thị marker camera, vòng tròn cảnh báo vùng ngập đỏ (`Circle`), vẽ đường đi (`Polyline` giải mã từ `encodedPolyline`), và lớp bản đồ nhiệt (`OverlayView` Canvas Heatmap tương thích v3.65+).
   - Lắng nghe dữ liệu thời gian thực từ **Firebase Web SDK** (`onSnapshot` trên collection `active_flood_zones`).
 - **Nhiệm vụ trọng tâm:**
   - Giao diện bản đồ chính + Thanh chọn điểm đi / điểm đến (ưu tiên xe máy).
@@ -20,7 +20,7 @@ Tài liệu này quy định lộ trình triển khai từng bước từ khâu 
 - **Kỹ năng cần thiết:**
   - Python 3.11+, FastAPI, `httpx`, `pydantic`.
   - **Firebase Admin SDK** (`firebase-admin`): đọc/ghi `active_flood_zones` và `flood_events_history`.
-  - **Google Routes API** (`https://routes.googleapis.com/directions/v2:computeRoutes`): gọi chế độ `TWO_WHEELER`, giải mã `encodedPolyline` (thư viện `polyline`), kiểm tra khoảng cách/giao cắt hình học (Haversine / `shapely`) và tính toán điểm vòng tránh (`via` waypoint).
+  - **Google Routes API** (`https://routes.googleapis.com/directions/v2:computeRoutes`): gọi chế độ `TWO_WHEELER`, giải mã `encodedPolyline` (thư viện `polyline`), kiểm tra khoảng cách/giao cắt hình học (Pure-Python Haversine & đoạn thẳng — không cần cài thư viện C `shapely`) và tính toán điểm vòng tránh (`via` waypoint) hai phía trái/phải.
 - **Nhiệm vụ trọng tâm:**
   - Xây dựng toàn bộ REST API theo đúng `docs/api-and-data-contract.md`.
   - Hiện thực thuật toán **Dynamic Rerouting 2 lớp** né tọa độ ngập đỏ.
@@ -51,7 +51,7 @@ Tài liệu này quy định lộ trình triển khai từng bước từ khâu 
 flowchart LR
     P0["Phase 0 (Giờ 0–2)\nSetup, Keys & Contract"] --> P1["Phase 1 (Giờ 2–8)\nCore Modules độc lập"]
     P1 --> P2["Phase 2 (Giờ 8–14)\nRoutes API Rerouting\n& Firestore Real-time"]
-    P2 --> P3["Phase 3 (Giờ 14–19)\nCamera Worker, Upload\n& HeatmapLayer"]
+    P2 --> P3["Phase 3 (Giờ 14–19)\nCamera Worker, Upload\n& Canvas Heatmap"]
     P3 --> P4["Phase 4 (Giờ 19–24)\nEnd-to-End Verify,\nBackup Video & Pitch"]
 ```
 
@@ -74,7 +74,7 @@ flowchart LR
 
 ### Phase 3: Luồng Camera Thực Tế, Crowdsourcing & Heatmap (Giờ 14 – Giờ 19)
 - [ ] **AI + Backend:** Kết nối `camera_extractor.py` vào endpoint `POST /api/cameras/poll` và `POST /api/reports` (nhận ảnh upload từ người dân -> Gemini 3.8 Flash chấm mức ngập -> tự động ghi vào Firestore nếu `severity_level >= 2`).
-- [ ] **Frontend:** Hoàn thiện Modal "Báo ngập nhanh (Crowdsourcing)" và nút bật/tắt lớp **Flood Frequency Heatmap** (`HeatmapLayer`) dành cho cơ quan quản lý đô thị.
+- [ ] **Frontend:** Hoàn thiện Modal "Báo ngập nhanh (Crowdsourcing)" và nút bật/tắt lớp **Flood Frequency Heatmap** (`HeatmapOverlay` trên `OverlayView` Canvas) dành cho cơ quan quản lý đô thị.
 - **Tiêu chí hoàn thành (DoD):** Upload 1 ảnh ngập thực tế trên Web App -> Gemini phân tích trả về mức ngập -> điểm đỏ xuất hiện trên bản đồ của mọi tab trình duyệt đang mở -> lộ trình tự động né điểm đó.
 
 ### Phase 4: Kiểm Thử End-to-End, Đóng Băng Code & Luyện Pitch (Giờ 19 – Giờ 24)

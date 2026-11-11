@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript contracts matching docs/api-and-data-contract.md
+ * Shared TypeScript contracts matching docs/api-and-data-contract.md and backend/app/schemas.py
  */
 
 export interface LatLng {
@@ -25,6 +25,33 @@ export interface FloodZoneItem {
   vision_model: string;
   status: "active" | "resolved";
   updated_at: string;
+  ttl_expires_at?: string | null;
+}
+
+export interface FloodAnalysisResult {
+  flood_detected: boolean;
+  severity_level: SeverityLevel;
+  visual_cue: string;
+  estimated_depth_cm: string;
+  passable_for_motorbike: boolean;
+  confidence: number;
+  vision_model: string;
+  analyzed_at: string;
+}
+
+export interface CrowdsourcingReportPayload {
+  lat: number;
+  lng: number;
+  location_name?: string;
+  reporter_note?: string;
+  image_base64?: string | null;
+  mock_severity_hint?: SeverityLevel;
+}
+
+export interface CrowdsourcingReportResponse {
+  report_id: string;
+  analysis: FloodAnalysisResult;
+  broadcasted_to_firestore: boolean;
 }
 
 export interface RouteRequest {
@@ -45,6 +72,28 @@ export interface RouteResponse {
   warning_message?: string | null;
 }
 
+export interface CameraItem {
+  camera_id: string;
+  name: string;
+  city: string;
+  source: string;
+  feed_url: string;
+  lat: number;
+  lng: number;
+  road_segment_id?: string | null;
+}
+
+export interface CameraPollResponse {
+  polled_count: number;
+  flooded_count: number;
+  results: Array<{
+    camera_id: string;
+    frame_source: string;
+    analysis: FloodAnalysisResult;
+    broadcasted_to_firestore: boolean;
+  }>;
+}
+
 export interface HeatmapPoint {
   zone_id: string;
   city: string;
@@ -54,4 +103,5 @@ export interface HeatmapPoint {
   flood_frequency_30d: number;
   avg_severity: number;
   weight: number;
+  peak_trigger?: string | null;
 }
