@@ -4,6 +4,31 @@
 
 ---
 
+## 0. Dành Cho Thành Viên Nhóm (Contributor Quick Start)
+
+Mọi thành viên khi `git clone` hoặc `git pull` repo về hãy thực hiện 3 bước sau để bắt đầu code ngay (hỗ trợ sẵn chế độ **`USE_MOCK_FALLBACK=true`** khi chưa có API key):
+
+```bash
+# 1. Tạo file biến môi trường từ mẫu
+cp .env.example .env
+
+# 2. Kiểm tra môi trường máy cá nhân (Python, Node, dữ liệu mẫu & trạng thái API keys)
+python scripts/check_env.py
+```
+
+### Danh Mục Tài Liệu Dành Cho Contributor (Đọc Trước Khi Code)
+| Tài liệu | Nội dung chính | Ai cần đọc? |
+| :--- | :--- | :--- |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Quy trình làm việc nhóm 3–4 người, phân vùng thư mục không conflict, quy tắc Git & Mock Fallback | **Tất cả thành viên** |
+| [docs/implementation-plan.md](docs/implementation-plan.md) | Kế hoạch chia 5 Phase theo giờ (Giờ 0 -> Giờ 24), ma trận kỹ năng và phân công 4 vai trò | **Tất cả thành viên** |
+| [docs/api-and-data-contract.md](docs/api-and-data-contract.md) | Hợp đồng REST API, Firestore Collections Schema và JSON Output của Gemini 3.8 Flash | **Frontend, Backend, AI** |
+| [docs/resource-and-research-guide.md](docs/resource-and-research-guide.md) | Hướng dẫn tạo Gemini/Maps/Firebase keys & Giải thuật 2 lớp Dynamic Rerouting trên Routes API | **Backend, AI, Team Lead** |
+| [docs/ architecture.md](docs/architecture.md) | Tổng quan kiến trúc kỹ thuật thời gian thực, quy ước mức ngập `0`–`3` và Heatmap | **Tất cả thành viên** |
+| [docs/idea-evaluation.md](docs/idea-evaluation.md) | Đánh giá SWOT và bộ câu trả lời phản biện Ban Giám Khảo (Q&A) | **Pitch Lead & Tất cả** |
+| [docs/verification-and-demo-playbook.md](docs/verification-and-demo-playbook.md) | Checklist Verify từng module và kịch bản Demo sân khấu 3 phút | **QA & Pitch Lead** |
+
+---
+
 ## 1. Bài toán (Problem Statement)
 
 Các ứng dụng bản đồ hiện nay chỉ điều hướng dựa trên **mật độ kẹt xe**, hoàn toàn **"mù" trước các điểm ngập nước cục bộ hoặc triều cường bất ngờ** tại các đô thị lớn như TP.HCM và Hà Nội.
@@ -63,7 +88,7 @@ Xây dựng một **Web App tích hợp bản đồ số thời gian thực** v�
 ```mermaid
 flowchart LR
     CAM["Camera giao thông công cộng\n(VD: camera.0511.vn)"] --> ING["Frame Extractor\n(Google Cloud Run / Worker)"]
-    USR["Người dân / Tài xế\n(Crowdsourcing Photo + GPS)"] --> API["Backend API\n(Cloud Run / Functions)"]
+    USR["Người dân / Tài xế\n(Crowdsourcing Photo + GPS)"] --> API["Backend API\n(FastAPI / Cloud Run)"]
     ING --> GEM["Gemini 3.8 Flash (Vision)\nNhận diện ngập lề đường / bánh xe"]
     API --> GEM
     GEM -->|"JSON Severity + Lat/Lng"| FB[("Firebase / Google Cloud\nFirestore Real-time + Storage")]
@@ -74,31 +99,21 @@ flowchart LR
     HEAT --> WEB
 ```
 
-Xem chi tiết đặc tả kỹ thuật tại [docs/architecture.md](docs/architecture.md).
-
 ---
 
-## 7. Cấu trúc thư mục Starter (Repository Structure)
+## 7. Cấu trúc thư mục (Repository Structure)
 
 ```text
 flood-safe-routing/
-├── frontend/          # Web App (Google Maps JS API, Firebase real-time alerts, Routes UI, Heatmap)
-├── backend/           # Cloud Run / API Gateway, Routes API flood-avoidance orchestration, camera poller
-├── ai-vision/         # Pipeline bóc tách frame & gọi Gemini 3.8 Flash (Vision) chấm mức độ ngập
-├── data/              # Schema mẫu cho tọa độ camera, sự kiện ngập (GeoJSON) và dữ liệu heatmap
-├── docs/              # Tài liệu kiến trúc hệ thống, luồng dữ liệu và kỹ thuật rerouting
-├── .env.example       # Biến môi trường mẫu (Google Maps, Gemini API, Firebase)
+├── frontend/          # React + Vite + TS (Google Maps JS API, Firebase real-time alerts, Routes UI, Heatmap)
+├── backend/           # Python FastAPI (Routes API flood-avoidance orchestration, Firestore service, REST API)
+├── ai-vision/         # Python + google-genai (Pipeline bóc tách frame & gọi Gemini 3.8 Flash chấm mức độ ngập)
+├── data/              # Dữ liệu mẫu cho tọa độ camera, sự kiện ngập (GeoJSON) và lịch sử heatmap
+├── docs/              # Toàn bộ tài liệu kế hoạch, hợp đồng API/Firestore, hướng dẫn tài nguyên, SWOT & Verify
+├── scripts/           # Script kiểm tra môi trường tự động (check_env.py)
+├── CONTRIBUTING.md    # Hướng dẫn làm việc nhóm & quy tắc nhánh Git
+├── .env.example       # Biến môi trường mẫu (hỗ trợ sẵn USE_MOCK_FALLBACK=true)
 ├── .gitignore
 ├── LICENSE
 └── README.md
 ```
-
----
-
-## 8. Lộ trình triển khai (24h Demo Roadmap)
-
-- [x] **Phase 0 — Khởi tạo dự án:** Xác định bài toán, chốt Google Tech Stack (Gemini 3.8 Flash, Google Maps Platform, Firebase / Google Cloud), schema dữ liệu và khởi tạo repository.
-- [ ] **Phase 1 — Ingestion & Gemini 3.8 Flash Vision:** Bóc tách frame từ camera công cộng / ảnh crowdsourcing và gọi Gemini Multimodal trả JSON phân loại mức ngập (`0`–`3`).
-- [ ] **Phase 2 — Firebase Real-time Sync:** Lưu tọa độ ngập và lịch sử lên Firestore, đồng bộ cảnh báo đỏ tức thời đến tất cả client trong khu vực.
-- [ ] **Phase 3 — Google Maps JS & Routes API Rerouting:** Hiển thị bản đồ, vùng cảnh báo đỏ, lớp Heatmap và xử lý bẻ hướng tự động (`TWO_WHEELER`) né tọa độ ngập.
-- [ ] **Phase 4 — Tích hợp & Demo End-to-End:** Kiểm thử kịch bản phát hiện điểm ngập mới từ camera/crowdsourcing và tự động chuyển hướng lộ trình tài xế theo thời gian thực.
