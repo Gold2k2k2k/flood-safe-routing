@@ -1,7 +1,9 @@
-# Environment variables
+# Environment variables & service credentials
 .env
 .env.local
 .env.*.local
+serviceAccountKey.json
+*firebase-adminsdk*.json
 
 # Node / Frontend
 node_modules/

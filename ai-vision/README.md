@@ -1,8 +1,8 @@
-# AI Vision — Flood Detection & Severity Estimation
+# AI Vision — Gemini 3.8 Flash Flood Detection
 
-Thư mục dành cho pipeline xử lý ảnh thời gian thực (bóc tách frame từ camera giao thông công cộng & ảnh người dùng báo cáo).
+Thư mục dành cho pipeline xử lý ảnh thời gian thực sử dụng **Gemini 3.8 Flash (Vision / Multimodal)** để bóc tách và đánh giá mức độ ngập từ camera giao thông công cộng & ảnh crowdsourcing.
 
 ## Nhiệm vụ chính
-1. **Frame Extractor:** Lấy snapshot/frame định kỳ từ luồng camera công cộng (ví dụ `camera.0511.vn`) hoặc xử lý ảnh crowdsourcing upload lên.
-2. **Flood Level Classifier:** Nhận diện sự hiện diện của nước ngập và phân loại mức độ ngập (`0: SAFE`, `1: MINOR`, `2: MODERATE`, `3: SEVERE`) cùng độ tin cậy (`confidence`).
-3. **Output chuẩn hóa:** Xuất sự kiện ngập gắn tọa độ để cập nhật lên bản đồ và kích hoạt Dynamic Rerouting.
+1. **Frame Extractor:** Lấy snapshot/frame định kỳ từ luồng camera công cộng (ví dụ `camera.0511.vn`) hoặc tiếp nhận ảnh người dùng gửi lên.
+2. **Gemini Multimodal Flood Classifier:** Gửi ảnh kèm prompt nhận diện dựa trên các mốc trực quan (**ngập lề đường**, **ngập nửa bánh xe**, **ngập sâu**) qua biến cấu hình `GEMINI_MODEL` (`gemini-3.8-flash`).
+3. **Structured JSON Output:** Chuẩn hóa kết quả (`severity_level` `0`–`3`, `visual_cue`, `passable_for_motorbike`, `confidence`) để ghi vào **Firebase Firestore**, bật cảnh báo đỏ trên bản đồ và kích hoạt **Dynamic Rerouting**.

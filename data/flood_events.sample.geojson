@@ -6,9 +6,11 @@
       "properties": {
         "event_id": "evt_001",
         "source": "camera_ai",
+        "vision_model": "gemini-3.8-flash",
         "camera_id": "cam_hcm_001",
         "severity_level": 2,
-        "estimated_depth_cm": "25-40",
+        "visual_cue": "Nước ngập quá mép lề đường và chạm nửa bánh xe máy",
+        "estimated_depth_cm": "20-35",
         "passable_for_motorbike": false,
         "confidence": 0.91,
         "status": "active",
