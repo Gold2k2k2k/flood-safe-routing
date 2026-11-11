@@ -14,16 +14,21 @@ cp .env.example .env
 
 # 2. Kiểm tra môi trường máy cá nhân (Python, Node, dữ liệu mẫu & trạng thái API keys)
 python scripts/check_env.py
+
+# 3. Chạy bộ kiểm thử tái lập & xác minh hợp đồng dữ liệu
+python -m unittest discover -s tests -v
 ```
 
 ### Danh Mục Tài Liệu Dành Cho Contributor (Đọc Trước Khi Code)
 | Tài liệu | Nội dung chính | Ai cần đọc? |
 | :--- | :--- | :--- |
+| [AGENTS.md](AGENTS.md) | Quy chuẩn kỹ thuật bắt buộc (English-only) cho mọi AI Coding Agent | **AI Coding Agents & Tech Lead** |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Quy trình làm việc nhóm 3–4 người, phân vùng thư mục không conflict, quy tắc Git & Mock Fallback | **Tất cả thành viên** |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Kế hoạch chia 5 Phase theo giờ (Giờ 0 -> Giờ 24), ma trận kỹ năng và phân công 4 vai trò | **Tất cả thành viên** |
 | [docs/api-and-data-contract.md](docs/api-and-data-contract.md) | Hợp đồng REST API, Firestore Collections Schema và JSON Output của Gemini 3.8 Flash | **Frontend, Backend, AI** |
 | [docs/resource-and-research-guide.md](docs/resource-and-research-guide.md) | Hướng dẫn tạo Gemini/Maps/Firebase keys & Giải thuật 2 lớp Dynamic Rerouting trên Routes API | **Backend, AI, Team Lead** |
-| [docs/ architecture.md](docs/architecture.md) | Tổng quan kiến trúc kỹ thuật thời gian thực, quy ước mức ngập `0`–`3` và Heatmap | **Tất cả thành viên** |
+| [docs/references/](docs/references/) | Tài liệu chuyên sâu (English-only) về `google-genai`, `Routes API v2`, `@vis.gl/react-google-maps`, `Firebase v10` & camera VN | **AI Coding Agents & Dev** |
+| [docs/architecture.md](docs/architecture.md) | Tổng quan kiến trúc kỹ thuật thời gian thực, quy ước mức ngập `0`–`3` và Heatmap | **Tất cả thành viên** |
 | [docs/idea-evaluation.md](docs/idea-evaluation.md) | Đánh giá SWOT và bộ câu trả lời phản biện Ban Giám Khảo (Q&A) | **Pitch Lead & Tất cả** |
 | [docs/verification-and-demo-playbook.md](docs/verification-and-demo-playbook.md) | Checklist Verify từng module và kịch bản Demo sân khấu 3 phút | **QA & Pitch Lead** |
 
@@ -109,8 +114,11 @@ flood-safe-routing/
 ├── backend/           # Python FastAPI (Routes API flood-avoidance orchestration, Firestore service, REST API)
 ├── ai-vision/         # Python + google-genai (Pipeline bóc tách frame & gọi Gemini 3.8 Flash chấm mức độ ngập)
 ├── data/              # Dữ liệu mẫu cho tọa độ camera, sự kiện ngập (GeoJSON) và lịch sử heatmap
-├── docs/              # Toàn bộ tài liệu kế hoạch, hợp đồng API/Firestore, hướng dẫn tài nguyên, SWOT & Verify
-├── scripts/           # Script kiểm tra môi trường tự động (check_env.py)
+├── docs/              # Tài liệu kế hoạch, hợp đồng API/Firestore, SWOT, Verify & deep references
+│   └── references/    # Tài liệu chuyên sâu (English-only) & code tái lập cho AI Coding Agents
+├── scripts/           # Script kiểm tra môi trường & công cụ tái lập (check_env, repro_*)
+├── tests/             # Bộ unit test & contract test tái lập (không cần API key trả phí)
+├── AGENTS.md          # Quy chuẩn & chỉ dẫn bắt buộc dành cho AI Coding Agents
 ├── CONTRIBUTING.md    # Hướng dẫn làm việc nhóm & quy tắc nhánh Git
 ├── .env.example       # Biến môi trường mẫu (hỗ trợ sẵn USE_MOCK_FALLBACK=true)
 ├── .gitignore
