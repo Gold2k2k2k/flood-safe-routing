@@ -6,6 +6,7 @@ interface UseAutoRerouteParams {
   origin: LatLng;
   destination: LatLng;
   zones: FloodZoneItem[];
+  avoidFloodZones?: boolean;
 }
 
 function buildSevereZonesSignature(zones: FloodZoneItem[]): string {
@@ -24,7 +25,12 @@ export interface AutoRerouteEvent {
   nextResult: RouteResponse;
 }
 
-export function useAutoReroute({ origin, destination, zones }: UseAutoRerouteParams) {
+export function useAutoReroute({
+  origin,
+  destination,
+  zones,
+  avoidFloodZones = true
+}: UseAutoRerouteParams) {
   const [routeResult, setRouteResult] = useState<RouteResponse | null>(null);
   const [previousRouteResult, setPreviousRouteResult] = useState<RouteResponse | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -48,7 +54,7 @@ export function useAutoReroute({ origin, destination, zones }: UseAutoReroutePar
         origin,
         destination,
         travel_mode: "TWO_WHEELER",
-        avoid_flood_zones: true
+        avoid_flood_zones: avoidFloodZones
       });
       setPreviousRouteResult(prevSnapshot);
       setRouteResult(res);
@@ -67,7 +73,7 @@ export function useAutoReroute({ origin, destination, zones }: UseAutoReroutePar
     } finally {
       setLoadingRoute(false);
     }
-  }, [origin, destination]);
+  }, [origin, destination, avoidFloodZones]);
 
   const dismissAutoRerouteEvent = useCallback(() => {
     setAutoRerouteEvent(null);

@@ -43,8 +43,10 @@ class TestAIVisionAndContracts(unittest.TestCase):
         self._prev_vision_url = os.environ.get("AI_VISION_URL")
         self._prev_fb_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
         self._prev_fb_proj = os.environ.get("FIREBASE_PROJECT_ID")
+        self._prev_osrm = os.environ.get("USE_OSRM_STREET_FALLBACK")
         os.environ["USE_MOCK_FALLBACK"] = "true"
         os.environ["GEMINI_API_KEY"] = "your_gemini_api_key"
+        os.environ["USE_OSRM_STREET_FALLBACK"] = "false"
         os.environ.pop("AI_VISION_URL", None)
         firebase_service._IN_MEMORY_ZONES = None
         firebase_service._IN_MEMORY_HEATMAP = None
@@ -74,6 +76,10 @@ class TestAIVisionAndContracts(unittest.TestCase):
             os.environ.pop("FIREBASE_PROJECT_ID", None)
         else:
             os.environ["FIREBASE_PROJECT_ID"] = self._prev_fb_proj
+        if self._prev_osrm is None:
+            os.environ.pop("USE_OSRM_STREET_FALLBACK", None)
+        else:
+            os.environ["USE_OSRM_STREET_FALLBACK"] = self._prev_osrm
 
     def test_mock_analyzer_conforms_to_schema_across_levels(self) -> None:
         safe = analyze_flood_image(b"fake-bytes", mock_severity_hint=0)
@@ -316,6 +322,22 @@ class TestAIVisionAndContracts(unittest.TestCase):
 
         os.environ["FIREBASE_SERVICE_ACCOUNT_JSON"] = '{"type":"service_account","project_id":"flood-safe-prod"}'
         self.assertTrue(settings.firebase_configured)
+
+    def test_camera_extractor_skips_html_portal_and_uses_synthetic_frame(self) -> None:
+        from src.camera_extractor import extract_frame_for_camera
+
+        raw, frame_source = asyncio.run(
+            extract_frame_for_camera(
+                {
+                    "camera_id": "cam_vercel_no_local",
+                    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+                    "default_severity_hint": 2,
+                }
+            )
+        )
+        self.assertEqual(frame_source, "mock_fallback")
+        self.assertIsNotNone(raw)
+        self.assertEqual(raw[:2], b"\xff\xd8")  # Valid JPEG header for frame-delta caching
 
 
 if __name__ == "__main__":

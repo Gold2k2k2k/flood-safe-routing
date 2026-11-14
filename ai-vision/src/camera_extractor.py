@@ -65,7 +65,34 @@ def should_skip_unchanged_frame(
     return False
 
 
-async def fetch_camera_snapshot(feed_url: str, timeout_sec: float = 8.0) -> bytes | None:
+def _looks_like_snapshot_endpoint(url: str) -> bool:
+    """Return True only when URL explicitly points to a camera image/snapshot endpoint."""
+    lower = url.lower().strip()
+    if not lower.startswith(("http://", "https://")):
+        return False
+    image_exts = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+    if lower.split("?", 1)[0].endswith(image_exts):
+        return True
+    hints = ("snapshot", "frame", "capture", "still", "/img", "/image", "cam_img")
+    return any(hint in lower for hint in hints)
+
+
+def _build_synthetic_camera_frame(camera_meta: dict[str, Any]) -> bytes:
+    """Generate a compact deterministic JPEG frame when local/snapshot assets are unavailable."""
+    severity = int(camera_meta.get("default_severity_hint") or 0)
+    palette = {
+        0: (64, 110, 82),
+        1: (132, 122, 68),
+        2: (146, 98, 56),
+        3: (128, 52, 52),
+    }
+    color = palette.get(severity, (100, 100, 100))
+    buf = io.BytesIO()
+    Image.new("RGB", (128, 72), color=color).save(buf, format="JPEG", quality=75)
+    return buf.getvalue()
+
+
+async def fetch_camera_snapshot(feed_url: str, timeout_sec: float = 2.5) -> bytes | None:
     """
     Download a single JPEG/PNG snapshot from a traffic camera HTTP endpoint.
     Returns None if the feed is unreachable or non-image so callers can degrade gracefully.
@@ -167,10 +194,16 @@ async def extract_frame_for_camera(camera_meta: dict[str, Any]) -> tuple[bytes |
         if raw:
             return raw, "local_video"
 
-    snapshot_url = camera_meta.get("snapshot_url") or camera_meta.get("feed_url")
-    if snapshot_url:
-        raw = await fetch_camera_snapshot(str(snapshot_url))
+    explicit_snapshot = camera_meta.get("snapshot_url")
+    if explicit_snapshot:
+        raw = await fetch_camera_snapshot(str(explicit_snapshot))
         if raw:
             return raw, "http_snapshot"
 
-    return None, "mock_fallback"
+    feed_url = camera_meta.get("feed_url")
+    if feed_url and _looks_like_snapshot_endpoint(str(feed_url)):
+        raw = await fetch_camera_snapshot(str(feed_url))
+        if raw:
+            return raw, "http_snapshot"
+
+    return _build_synthetic_camera_frame(camera_meta), "mock_fallback"

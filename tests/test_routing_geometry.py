@@ -13,11 +13,14 @@ import sys
 import unittest
 from pathlib import Path
 
+import httpx
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "backend"))
 
 from app.schemas import FloodZoneItem, LatLng, RouteRequest
 from app.services.routing_service import (
+    _call_osrm_street_routes,
     build_routes_api_v2_payload,
     compute_detour_candidates,
     compute_detour_waypoint,
@@ -55,6 +58,16 @@ def _sample_flood_zone(
 
 
 class TestRoutingGeometry(unittest.TestCase):
+    def setUp(self) -> None:
+        self._prev_osrm = os.environ.get("USE_OSRM_STREET_FALLBACK")
+        os.environ["USE_OSRM_STREET_FALLBACK"] = "false"
+
+    def tearDown(self) -> None:
+        if self._prev_osrm is None:
+            os.environ.pop("USE_OSRM_STREET_FALLBACK", None)
+        else:
+            os.environ["USE_OSRM_STREET_FALLBACK"] = self._prev_osrm
+
     def test_haversine_symmetry_and_sanity(self) -> None:
         p1 = LatLng(lat=10.7769, lng=106.7009)
         p2 = LatLng(lat=10.7992, lng=106.7185)
@@ -276,6 +289,36 @@ class TestRoutingGeometry(unittest.TestCase):
                 os.environ.pop("GOOGLE_MAPS_API_KEY", None)
             else:
                 os.environ["GOOGLE_MAPS_API_KEY"] = prev_key
+
+
+    def test_osrm_street_routes_normalization_with_mock_transport(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertIn("/route/v1/driving/", request.url.path)
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "routes": [
+                        {
+                            "distance": 3120.4,
+                            "duration": 290.0,
+                            "geometry": "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+                        }
+                    ],
+                },
+            )
+
+        res = asyncio.run(
+            _call_osrm_street_routes(
+                LatLng(lat=10.78, lng=106.703),
+                LatLng(lat=10.792, lng=106.714),
+                travel_mode="TWO_WHEELER",
+                http_transport=httpx.MockTransport(handler),
+            )
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["distanceMeters"], 3120)
+        self.assertEqual(res[0]["polyline"]["encodedPolyline"], "_p~iF~ps|U_ulLnnqC_mqNvxq`@")
 
 
 if __name__ == "__main__":

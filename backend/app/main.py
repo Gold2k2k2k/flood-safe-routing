@@ -7,6 +7,7 @@ and stage demo lifecycle controls.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -308,10 +309,7 @@ async def poll_cameras(
         selected = set(req.camera_ids)
         cameras = [c for c in cameras if c.camera_id in selected]
 
-    results: list[CameraPollResultItem] = []
-    flooded_count = 0
-
-    for cam in cameras:
+    async def _poll_single(cam: Any) -> tuple[Any, str, Any, bool]:
         effective_hint = (
             req.mock_severity_hint
             if req.mock_severity_hint is not None
@@ -327,6 +325,14 @@ async def poll_cameras(
             force_refresh=req.force_refresh,
             hint_explicitly_set=(req.mock_severity_hint is not None),
         )
+        return cam, frame_source, analysis, frame_delta_skipped
+
+    polled_items = await asyncio.gather(*(_poll_single(cam) for cam in cameras))
+
+    results: list[CameraPollResultItem] = []
+    flooded_count = 0
+
+    for cam, frame_source, analysis, frame_delta_skipped in polled_items:
 
         if frame_delta_skipped:
             if analysis.severity_level >= 1:

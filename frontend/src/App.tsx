@@ -14,6 +14,7 @@ import {
 import { subscribeToActiveFloodZones } from "./services/firebase";
 import type {
   CameraItem,
+  CameraPollResponse,
   CameraPollResultItem,
   FloodZoneItem,
   HeatmapPoint,
@@ -43,8 +44,8 @@ const ROUTE_PRESETS: RoutePreset[] = [
   {
     id: "danang-center",
     label: "Đà Nẵng: Thanh Khê → Hải Châu",
-    origin: { lat: 16.058, lng: 108.204 },
-    destination: { lat: 16.0715, lng: 108.2255 }
+    origin: { lat: 16.0565, lng: 108.208 },
+    destination: { lat: 16.0715, lng: 108.2175 }
   }
 ];
 
@@ -84,11 +85,14 @@ export function App() {
   const [clickMode, setClickMode] = useState<MapClickMode>(null);
 
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [avoidFloodZones, setAvoidFloodZones] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<"zones" | "cameras">("zones");
   const [zonesLoaded, setZonesLoaded] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [pollingCameraId, setPollingCameraId] = useState<string | null>(null);
+  const [lastPollSummary, setLastPollSummary] = useState<CameraPollResponse | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
@@ -107,7 +111,8 @@ export function App() {
   } = useAutoReroute({
     origin,
     destination,
-    zones
+    zones,
+    avoidFloodZones
   });
 
   useEffect(() => {
@@ -161,12 +166,20 @@ export function App() {
     setClickMode(null);
   };
 
-  const handlePollCameras = async (singleCameraId?: string) => {
+  const handlePollCameras = async (singleCameraId?: string, forceRefresh = false) => {
     if (singleCameraId) setPollingCameraId(singleCameraId);
     else setPolling(true);
     setStatusError(null);
     try {
-      const pollResp = await triggerCameraPoll(singleCameraId ? [singleCameraId] : undefined);
+      const pollResp = await triggerCameraPoll(
+        singleCameraId
+          ? { camera_ids: [singleCameraId], force_refresh: true }
+          : { force_refresh: forceRefresh }
+      );
+      setLastPollSummary(pollResp);
+      if (!singleCameraId) {
+        setSidebarTab("cameras");
+      }
       setPollResultsByCamera((prev) => {
         const next = { ...prev };
         pollResp.results.forEach((item) => {
@@ -337,21 +350,40 @@ export function App() {
 
         {/* Main Actions */}
         <div style={{ display: "grid", gap: "0.5rem", marginBottom: "0.9rem" }}>
-          <button
-            onClick={() => void computeRoute(false)}
-            disabled={loadingRoute}
-            style={{
-              padding: "0.6rem 0.75rem",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              cursor: loadingRoute ? "wait" : "pointer",
-              fontWeight: 600
-            }}
-          >
-            {loadingRoute ? "Đang tính lộ trình..." : "Tính lộ trình né ngập (TWO_WHEELER)"}
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.45rem" }}>
+            <button
+              onClick={() => void computeRoute(false)}
+              disabled={loadingRoute}
+              style={{
+                padding: "0.6rem 0.75rem",
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: loadingRoute ? "wait" : "pointer",
+                fontWeight: 600
+              }}
+            >
+              {loadingRoute ? "Đang tính lộ trình..." : "Tính lộ trình né ngập (TWO_WHEELER)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAvoidFloodZones((v) => !v)}
+              title="Bật/tắt chế độ né ngập để so sánh tuyến gốc và tuyến vòng an toàn"
+              style={{
+                padding: "0.55rem 0.65rem",
+                borderRadius: "8px",
+                border: avoidFloodZones ? "1px solid #22c55e" : "1px solid #ef4444",
+                background: avoidFloodZones ? "rgba(34, 197, 94, 0.16)" : "rgba(239, 68, 68, 0.18)",
+                color: avoidFloodZones ? "#86efac" : "#fca5a5",
+                cursor: "pointer",
+                fontSize: "0.75rem",
+                fontWeight: 700
+              }}
+            >
+              {avoidFloodZones ? "🛡️ Né ngập: BẬT" : "⚠️ Né ngập: TẮT"}
+            </button>
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <button
@@ -385,9 +417,9 @@ export function App() {
             </button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.5rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0.45rem" }}>
             <button
-              onClick={() => void handlePollCameras()}
+              onClick={() => void handlePollCameras(undefined, false)}
               disabled={polling}
               style={{
                 padding: "0.48rem 0.6rem",
@@ -396,10 +428,28 @@ export function App() {
                 border: "none",
                 borderRadius: "6px",
                 cursor: polling ? "wait" : "pointer",
-                fontSize: "0.8rem"
+                fontSize: "0.8rem",
+                fontWeight: 600
               }}
             >
               {polling ? "Đang quét frame camera..." : `Quét Camera AI (${cameras.length} điểm)`}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePollCameras(undefined, true)}
+              disabled={polling}
+              title="Quét mới lại toàn bộ frame (bỏ qua cache khung hình tĩnh)"
+              style={{
+                padding: "0.48rem 0.55rem",
+                background: "#115e59",
+                color: "#ccfbf1",
+                border: "1px solid #0d9488",
+                borderRadius: "6px",
+                cursor: polling ? "wait" : "pointer",
+                fontSize: "0.75rem"
+              }}
+            >
+              Force
             </button>
             <button
               onClick={() => void handleResetDemo()}
@@ -418,6 +468,26 @@ export function App() {
               {resetting ? "..." : "↻ Reset"}
             </button>
           </div>
+
+          {lastPollSummary && (
+            <div
+              style={{
+                padding: "0.5rem 0.65rem",
+                borderRadius: "8px",
+                background: "rgba(15, 118, 110, 0.2)",
+                border: "1px solid #14b8a6",
+                fontSize: "0.76rem",
+                color: "#ccfbf1"
+              }}
+            >
+              <strong>📡 Đã quét {lastPollSummary.polled_count} camera:</strong> phát hiện{" "}
+              <strong>{lastPollSummary.flooded_count}</strong> điểm có ngập • dùng cache tĩnh{" "}
+              <strong>
+                {lastPollSummary.results.filter((r) => r.frame_delta_skipped).length}
+              </strong>{" "}
+              điểm.
+            </div>
+          )}
         </div>
 
         {/* Emergency Auto-Reroute Live Banner */}
@@ -570,38 +640,117 @@ export function App() {
           </div>
         )}
 
-        <h2 style={{ fontSize: "0.92rem", marginBottom: "0.5rem" }}>
-          Điểm ngập đang kích hoạt ({zones.length})
-        </h2>
-        {zones.map((z) => {
-          const isSelected = selectedEntity?.kind === "zone" && selectedEntity.zone.event_id === z.event_id;
-          return (
-            <div
-              key={z.event_id}
-              onClick={() => setSelectedEntity({ kind: "zone", zone: z })}
-              style={{
-                padding: "0.7rem",
-                background: isSelected ? "#172554" : "#0f172a",
-                borderRadius: "8px",
-                marginBottom: "0.5rem",
-                borderLeft: z.severity_level >= 2 ? "4px solid #ef4444" : "4px solid #eab308",
-                borderTop: isSelected ? "1px solid #3b82f6" : "1px solid transparent",
-                fontSize: "0.82rem",
-                cursor: "pointer"
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.4rem" }}>
-                <span style={{ fontWeight: 600 }}>{z.location_name || z.event_id}</span>
-                <span style={{ color: "#94a3b8", fontSize: "0.72rem" }}>M{z.severity_level}</span>
-              </div>
-              <div style={{ color: "#cbd5e1", marginTop: "0.15rem" }}>{z.visual_cue}</div>
-              <div style={{ color: "#94a3b8", fontSize: "0.72rem", marginTop: "0.25rem" }}>
-                {z.estimated_depth_cm} cm • {z.source === "camera_ai" ? "Camera AI" : "Cộng đồng"} •{" "}
-                {z.vision_model}
-              </div>
-            </div>
-          );
-        })}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem", marginBottom: "0.6rem" }}>
+          <button
+            type="button"
+            onClick={() => setSidebarTab("zones")}
+            style={{
+              padding: "0.45rem 0.5rem",
+              borderRadius: "6px",
+              border: sidebarTab === "zones" ? "1px solid #ef4444" : "1px solid #334155",
+              background: sidebarTab === "zones" ? "rgba(239, 68, 68, 0.16)" : "#0f172a",
+              color: "#f8fafc",
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              cursor: "pointer"
+            }}
+          >
+            Điểm ngập ({zones.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidebarTab("cameras")}
+            style={{
+              padding: "0.45rem 0.5rem",
+              borderRadius: "6px",
+              border: sidebarTab === "cameras" ? "1px solid #0ea5e9" : "1px solid #334155",
+              background: sidebarTab === "cameras" ? "rgba(14, 165, 233, 0.16)" : "#0f172a",
+              color: "#f8fafc",
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              cursor: "pointer"
+            }}
+          >
+            Camera AI ({cameras.length})
+          </button>
+        </div>
+
+        {sidebarTab === "zones"
+          ? zones.map((z) => {
+              const isSelected = selectedEntity?.kind === "zone" && selectedEntity.zone.event_id === z.event_id;
+              return (
+                <div
+                  key={z.event_id}
+                  onClick={() => setSelectedEntity({ kind: "zone", zone: z })}
+                  style={{
+                    padding: "0.7rem",
+                    background: isSelected ? "#172554" : "#0f172a",
+                    borderRadius: "8px",
+                    marginBottom: "0.5rem",
+                    borderLeft: z.severity_level >= 2 ? "4px solid #ef4444" : "4px solid #eab308",
+                    borderTop: isSelected ? "1px solid #3b82f6" : "1px solid transparent",
+                    fontSize: "0.82rem",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.4rem" }}>
+                    <span style={{ fontWeight: 600 }}>{z.location_name || z.event_id}</span>
+                    <span style={{ color: "#94a3b8", fontSize: "0.72rem" }}>M{z.severity_level}</span>
+                  </div>
+                  <div style={{ color: "#cbd5e1", marginTop: "0.15rem" }}>{z.visual_cue}</div>
+                  <div style={{ color: "#94a3b8", fontSize: "0.72rem", marginTop: "0.25rem" }}>
+                    {z.estimated_depth_cm} cm • {z.source === "camera_ai" ? "Camera AI" : "Cộng đồng"} •{" "}
+                    {z.vision_model}
+                  </div>
+                </div>
+              );
+            })
+          : cameras.map((cam) => {
+              const pollRes = pollResultsByCamera[cam.camera_id];
+              const isSelected = selectedEntity?.kind === "camera" && selectedEntity.camera.camera_id === cam.camera_id;
+              const sev = pollRes?.analysis.severity_level ?? cam.default_severity_hint ?? 0;
+              return (
+                <div
+                  key={cam.camera_id}
+                  onClick={() =>
+                    setSelectedEntity({ kind: "camera", camera: cam, pollResult: pollRes })
+                  }
+                  style={{
+                    padding: "0.68rem",
+                    background: isSelected ? "#0c4a6e" : "#0f172a",
+                    borderRadius: "8px",
+                    marginBottom: "0.5rem",
+                    borderLeft: sev >= 2 ? "4px solid #ef4444" : sev === 1 ? "4px solid #eab308" : "4px solid #0284c7",
+                    borderTop: isSelected ? "1px solid #38bdf8" : "1px solid transparent",
+                    fontSize: "0.8rem",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.4rem" }}>
+                    <span style={{ fontWeight: 600 }}>{cam.name}</span>
+                    <span style={{ color: "#7dd3fc", fontSize: "0.72rem", whiteSpace: "nowrap" }}>
+                      {cam.city}
+                    </span>
+                  </div>
+                  {pollRes ? (
+                    <>
+                      <div style={{ color: "#cbd5e1", marginTop: "0.2rem" }}>
+                        {pollRes.analysis.visual_cue}
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: "0.72rem", marginTop: "0.25rem" }}>
+                        Mức {pollRes.analysis.severity_level} ({pollRes.analysis.estimated_depth_cm} cm) •{" "}
+                        <code>{pollRes.frame_source}</code>
+                        {pollRes.frame_delta_skipped ? " • Cache hit" : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: "#94a3b8", fontSize: "0.73rem", marginTop: "0.2rem" }}>
+                      <code>{cam.camera_id}</code> • Chưa quét trong phiên này (bấm xem hoặc Quét AI)
+                    </div>
+                  )}
+                </div>
+              );
+            })}
       </aside>
 
       <main style={{ background: "#0f172a", height: "100%", minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
