@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT_DIR / "backend"))
 
 from fastapi.testclient import TestClient
 from src.analyzer import analyze_flood_image, preprocess_image_bytes
-from src.camera_extractor import compute_frame_delta
+from src.camera_extractor import clear_camera_frame_cache, compute_frame_delta
 from src.schemas import FloodAnalysisResult
 from app.main import app
 from app.services import firebase_service
@@ -38,9 +38,13 @@ class TestAIVisionAndContracts(unittest.TestCase):
         os.environ["USE_MOCK_FALLBACK"] = "true"
         os.environ["GEMINI_API_KEY"] = "your_gemini_api_key"
         firebase_service._IN_MEMORY_ZONES = None
+        firebase_service._IN_MEMORY_HEATMAP = None
+        clear_camera_frame_cache()
 
     def tearDown(self) -> None:
         firebase_service._IN_MEMORY_ZONES = None
+        firebase_service._IN_MEMORY_HEATMAP = None
+        clear_camera_frame_cache()
         if self._prev_key is None:
             os.environ.pop("GEMINI_API_KEY", None)
         else:
@@ -132,6 +136,84 @@ class TestAIVisionAndContracts(unittest.TestCase):
         heatmap = client.get("/api/heatmap")
         self.assertEqual(heatmap.status_code, 200)
         self.assertGreaterEqual(heatmap.json()["count"], 1)
+
+    def test_camera_poll_frame_delta_deduplication_and_force_refresh(self) -> None:
+        client = TestClient(app)
+
+        first = client.post("/api/cameras/poll", json={"camera_ids": ["cam_hcm_001"]})
+        self.assertEqual(first.status_code, 200)
+        r1 = first.json()["results"][0]
+        self.assertEqual(r1["frame_source"], "local_image")
+        self.assertFalse(r1["frame_delta_skipped"])
+        self.assertEqual(r1["analysis"]["severity_level"], 2)
+
+        second = client.post("/api/cameras/poll", json={"camera_ids": ["cam_hcm_001"]})
+        self.assertEqual(second.status_code, 200)
+        r2 = second.json()["results"][0]
+        self.assertTrue(r2["frame_delta_skipped"])
+        self.assertFalse(r2["broadcasted_to_firestore"])
+        self.assertEqual(r2["analysis"]["severity_level"], 2)
+
+        forced = client.post(
+            "/api/cameras/poll",
+            json={"camera_ids": ["cam_hcm_001"], "force_refresh": True},
+        )
+        self.assertEqual(forced.status_code, 200)
+        self.assertFalse(forced.json()["results"][0]["frame_delta_skipped"])
+
+    def test_multipart_form_report_and_heatmap_history_accumulation(self) -> None:
+        client = TestClient(app)
+
+        initial_heat = client.get("/api/heatmap").json()["items"]
+        nhc_before = next(h for h in initial_heat if h["zone_id"] == "hcm_binh_thanh_nhc")
+        self.assertEqual(nhc_before["flood_frequency_30d"], 16)
+
+        img_file = _png_bytes(320, 240, (110, 90, 70))
+        resp = client.post(
+            "/api/reports",
+            data={
+                "lat": "10.7859",
+                "lng": "106.7083",
+                "location_name": "Nguyễn Hữu Cảnh (cạnh cầu vượt)",
+                "reporter_note": "Ngập sâu lút ống xả",
+                "mock_severity_hint": "3",
+            },
+            files={"image": ("flood_scene.png", img_file, "image/png")},
+        )
+        self.assertEqual(resp.status_code, 200)
+        rep = resp.json()
+        self.assertEqual(rep["analysis"]["severity_level"], 3)
+
+        updated_heat = client.get("/api/heatmap").json()["items"]
+        nhc_after = next(h for h in updated_heat if h["zone_id"] == "hcm_binh_thanh_nhc")
+        self.assertEqual(nhc_after["flood_frequency_30d"], 17)
+        expected_avg = round((16 * 2.4 + 3.0) / 17.0, 2)
+        self.assertEqual(nhc_after["avg_severity"], expected_avg)
+        self.assertEqual(nhc_after["weight"], round(17 * expected_avg, 2))
+
+    def test_flood_zone_delete_and_reset_demo_lifecycle(self) -> None:
+        client = TestClient(app)
+
+        del_resp = client.delete("/api/flood-zones/evt_001")
+        self.assertEqual(del_resp.status_code, 200)
+        self.assertTrue(del_resp.json()["deleted"])
+
+        route_clear = client.post(
+            "/api/route",
+            json={
+                "origin": {"lat": 10.7800, "lng": 106.7030},
+                "destination": {"lat": 10.7920, "lng": 106.7140},
+                "travel_mode": "TWO_WHEELER",
+                "avoid_flood_zones": True,
+            },
+        )
+        self.assertEqual(route_clear.status_code, 200)
+        self.assertFalse(route_clear.json()["rerouted"])
+
+        reset_resp = client.post("/api/flood-zones/reset", json={})
+        self.assertEqual(reset_resp.status_code, 200)
+        ids_after_reset = [z["event_id"] for z in reset_resp.json()["items"]]
+        self.assertIn("evt_001", ids_after_reset)
 
     def test_mock_disabled_returns_503_when_keys_missing(self) -> None:
         os.environ["USE_MOCK_FALLBACK"] = "false"

@@ -81,24 +81,25 @@ def preprocess_image_bytes(
 
 
 def _build_mock_result(model_name: str, mock_severity_hint: int) -> FloodAnalysisResult:
-    is_flooded = mock_severity_hint >= 1
-    passable = mock_severity_hint < 2
-    if mock_severity_hint >= 3:
+    level = max(0, min(3, int(mock_severity_hint)))
+    is_flooded = level >= 1
+    passable = level < 2
+    if level >= 3:
         cue = "Nước ngập sâu quá nửa bánh xe máy và chạm ống xả (Mock Fallback)"
         depth = ">35"
-    elif mock_severity_hint == 2:
+    elif level == 2:
         cue = "Nước ngập quá mép lề đường và chạm khoảng nửa bánh xe máy (Mock Fallback)"
         depth = "20-35"
-    elif mock_severity_hint == 1:
+    elif level == 1:
         cue = "Nước đọng nhẹ sát mép lề đường, xe máy đi chậm qua được (Mock Fallback)"
         depth = "5-15"
     else:
-        cue = "Mặt đường thông thoáng, xe máy di chuyển bình thường (Mock Fallback)"
+        cue = "Mặt đường thông thoáng, vạch kẻ đường rõ nét, xe máy di chuyển bình thường (Mock Fallback)"
         depth = "0"
 
     return FloodAnalysisResult(
         flood_detected=is_flooded,
-        severity_level=mock_severity_hint,
+        severity_level=level,
         visual_cue=cue,
         estimated_depth_cm=depth,
         passable_for_motorbike=passable,
@@ -118,8 +119,14 @@ def _parse_gemini_response(response: object, model_name: str) -> FloodAnalysisRe
             raise ValueError("Gemini Vision returned empty response text.")
         llm_out = FloodAnalysisLLMOutput.model_validate_json(raw_text)
 
+    payload = llm_out.model_dump()
+    level = int(payload["severity_level"])
+    # Enforce canonical contract invariants across severity_level, flood_detected, and passability
+    payload["flood_detected"] = level >= 1
+    payload["passable_for_motorbike"] = level < 2
+
     return FloodAnalysisResult(
-        **llm_out.model_dump(),
+        **payload,
         vision_model=model_name,
         analyzed_at=datetime.now(timezone.utc).isoformat(),
     )

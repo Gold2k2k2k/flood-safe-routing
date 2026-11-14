@@ -42,3 +42,27 @@
 2. **Dữ liệu & AI Vision:** Nạp 5–10 ảnh/video ngập thực tế vào `data/`, bỏ mock fallback để đo độ chính xác thực tế của `Gemini 3.8 Flash`, bổ sung upload ảnh lên Firebase Storage.
 3. **Backend & Frontend:** Kiểm thử live `Routes API v2`, bổ sung chọn điểm Đi/Đến (Places API / click map), vẽ song song tuyến cũ (đỏ nét đứt) vs tuyến né ngập (xanh lá) và InfoWindow hiển thị kết quả phân tích của Gemini.
 4. **Quy trình Git:** Các thành viên tách nhánh theo `CONTRIBUTING.md`, commit và push đều đặn theo từng Phase để Mentor theo dõi tiến độ.
+
+---
+
+## 4. Cập Nhật Thực Thi: Hoàn Thành Phase 1 & Phase 2 (`2026-11-14`)
+
+- **Thời điểm cập nhật:** `2026-11-14 09:40 (+07:00)`
+- **Phạm vi hoàn thành:** Trọn vẹn **Phase 1** & **Phase 2** theo [implementation_plan.md](file:///e:/Bách/GDG%202026/implementation_plan.md).
+- **Chi tiết hạng mục đã hoàn thiện:**
+  1. **Phase 1 — Hợp đồng dữ liệu, Bộ dữ liệu thực địa & AI Vision (`docs/`, `ai-vision/`, `data/`):**
+     - Cập nhật [docs/api-and-data-contract.md](file:///e:/Bách/GDG%202026/docs/api-and-data-contract.md) và đồng bộ 1:1 giữa `backend/app/schemas.py` và `frontend/src/types/flood.ts` (`baseline_route_coordinates`, `detour_waypoints_used`, `frame_delta_skipped`, `force_refresh`, `local_image_path`, `default_severity_hint`, `POST /api/flood-zones/reset`, `DELETE /api/flood-zones/{event_id}`).
+     - Tinh chỉnh `SYSTEM_PROMPT` chống ảo giác mặt đường ướt / ảnh rác trong `ai-vision/src/analyzer.py`, bổ sung chuẩn hóa tính nhất quán schema và hàng rào độ tin cậy `FLOOD_ALERT_THRESHOLD`.
+     - Hoàn thiện bộ đệm `frame_delta` + kết quả phân tích liền trước trong `ai-vision/src/camera_extractor.py` giúp bỏ qua frame tĩnh (`delta < 0.04`), tiết kiệm lượt gọi Gemini API.
+     - Mở rộng bộ dữ liệu mẫu: **9 camera** giao thông (TP.HCM, Đà Nẵng, Hà Nội), **5 vùng ngập** kích hoạt, **10 điểm lịch sử Heatmap** và **4 frame ảnh đường phố mẫu** (`level_0_safe.jpg` -> `level_3_severe.jpg`).
+  2. **Phase 2 — Dynamic Rerouting Đa Điểm Ngập & Quản Trị Vòng Đời Sự Kiện (`backend/`):**
+     - Nâng cấp thuật toán **Two-Layer Flood Avoidance** trong `backend/app/services/routing_service.py`: trả về `baseline_route_coordinates`, xử lý né đa vùng ngập liên tiếp và vùng ngập lân cận theo từng phân đoạn (`compute_multi_zone_detour_waypoints`, `compute_multi_zone_detour_plans`), giữ vững cả 5 ràng buộc cứng của Google `Routes API v2`.
+     - Sửa logic cộng dồn thực tế `flood_frequency_30d`, tính lại trung bình trượt `avg_severity` và `weight` trong `backend/app/services/firebase_service.py` cho cả chế độ in-memory lẫn Firestore thật.
+     - Hoàn thiện `POST /api/reports` hỗ trợ song song `application/json` và `multipart/form-data`, tích hợp `frame_delta_skipped` vào `POST /api/cameras/poll`, bổ sung `POST /api/flood-zones/reset` và `DELETE /api/flood-zones/{event_id}` trong `backend/app/main.py`.
+     - Khắc phục vòng lặp gọi lại `/api/route` trong `frontend/src/hooks/useAutoReroute.ts` khi tồn tại vùng ngập ở thành phố khác không cắt lộ trình.
+- **Kết quả kiểm chứng tự động:**
+  - `python scripts/check_env.py` -> `[READY]` (`9` cameras, `5` flood zones, `10` heatmap records).
+  - `python -m unittest discover -s tests -v` -> **20/20 tests PASS** (`0` warnings).
+  - `python scripts/repro_routing.py`, `repro_gemini_vision.py`, `repro_camera_fetch.py` -> **PASS**.
+  - `cd frontend && npm run build` (`tsc -b && vite build`) -> **PASS** (`0` lỗi TypeScript/Vite).
+- **Giai đoạn tiếp theo:** Bắt đầu **Phase 3** (Giao diện bản đồ Before/After Polyline, chọn điểm Đi/Đến & Preset kịch bản, Thẻ AI Vision Inspector, và Bản đồ Vector tương tác dự phòng).

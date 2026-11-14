@@ -18,23 +18,40 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 _LAST_CAMERA_FRAMES: dict[str, bytes] = {}
+_LAST_CAMERA_ANALYSES: dict[str, Any] = {}
 
 
 def clear_camera_frame_cache() -> None:
-    """Clear in-memory camera frame cache, e.g. for demo resets or tests."""
+    """Clear in-memory camera frame and analysis caches, e.g. for demo resets or tests."""
     _LAST_CAMERA_FRAMES.clear()
+    _LAST_CAMERA_ANALYSES.clear()
+
+
+def get_cached_camera_analysis(camera_id: str) -> Any | None:
+    """Return the most recent cached FloodAnalysisResult for camera_id, if any."""
+    return _LAST_CAMERA_ANALYSES.get(camera_id)
+
+
+def record_camera_frame_analysis(
+    camera_id: str, frame_bytes: bytes | None, analysis: Any
+) -> None:
+    """Store latest frame bytes and AI analysis result for frame-delta deduplication."""
+    if frame_bytes:
+        _LAST_CAMERA_FRAMES[camera_id] = frame_bytes
+    _LAST_CAMERA_ANALYSES[camera_id] = analysis
 
 
 def should_skip_unchanged_frame(
     camera_id: str,
     curr_bytes: bytes | None,
     threshold: float = 0.04,
+    commit_frame: bool = True,
 ) -> bool:
     """
     Check if camera frame is virtually identical to the previous frame.
     If curr_bytes is None, returns False.
     If previous frame exists and delta < threshold, returns True (skip).
-    Otherwise caches curr_bytes and returns False (proceed).
+    Otherwise optionally caches curr_bytes and returns False (proceed).
     """
     if not curr_bytes:
         return False
@@ -43,7 +60,8 @@ def should_skip_unchanged_frame(
         delta = compute_frame_delta(prev, curr_bytes)
         if delta < threshold:
             return True
-    _LAST_CAMERA_FRAMES[camera_id] = curr_bytes
+    if commit_frame:
+        _LAST_CAMERA_FRAMES[camera_id] = curr_bytes
     return False
 
 
@@ -124,7 +142,8 @@ def compute_frame_delta(prev_bytes: bytes, curr_bytes: bytes) -> float:
             if not pixels:
                 return 1.0
             return sum(pixels) / (len(pixels) * 255.0)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Frame delta computation failed; treating frame as changed: %s", exc)
         return 1.0
 
 

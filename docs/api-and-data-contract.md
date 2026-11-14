@@ -121,15 +121,18 @@ Trả về danh sách các vùng ngập đang kích hoạt (dùng cho khởi t�
   ```
 
 ### 3.3. `POST /api/reports`
-Người dân / tài xế gửi báo cáo ngập kèm ảnh hiện trường (hoặc URL/base64 ảnh) và tọa độ GPS.
-- **Request (`multipart/form-data` hoặc `application/json`):**
+Người dân / tài xế gửi báo cáo ngập kèm ảnh hiện trường (upload file `image` qua `multipart/form-data` hoặc chuỗi `image_base64` qua `application/json`) và tọa độ GPS.
+- **Request (`application/json` hoặc `multipart/form-data`):**
+  - Với `multipart/form-data`: gửi các trường form `lat` (`float`), `lng` (`float`), `location_name` (`str`, tùy chọn), `reporter_note` (`str`, tùy chọn), `mock_severity_hint` (`int`, tùy chọn `0..3`) và file `image` (`UploadFile`, tùy chọn khi chạy mock).
+  - Với `application/json`:
   ```json
   {
     "lat": 10.7858,
     "lng": 106.7082,
     "location_name": "Nguyễn Hữu Cảnh, Bình Thạnh",
     "reporter_note": "Nước dâng nhanh sau mưa 20 phút",
-    "image_base64": "<chuỗi_base64_hoặc_để_trống_khi_test_mock>"
+    "image_base64": "<chuỗi_base64_hoặc_để_trống_khi_test_mock>",
+    "mock_severity_hint": 2
   }
   ```
 - **Response `200 OK`:**
@@ -143,7 +146,8 @@ Người dân / tài xế gửi báo cáo ngập kèm ảnh hiện trường (ho
       "estimated_depth_cm": "20-35",
       "passable_for_motorbike": false,
       "confidence": 0.91,
-      "vision_model": "gemini-3.8-flash"
+      "vision_model": "gemini-3.8-flash",
+      "analyzed_at": "2026-11-14T02:00:00+00:00"
     },
     "broadcasted_to_firestore": true
   }
@@ -214,21 +218,21 @@ Lấy dữ liệu tổng hợp tần suất ngập phục vụ lớp bản đồ
 Lấy danh sách các điểm camera giao thông đang theo dõi (kèm tọa độ GPS và tên tuyến đường).
 - **Các trường mở rộng trong `CameraItem`:**
   - `local_image_path`: `str | None` — Đường dẫn tương đối hoặc tuyệt đối tới file ảnh tĩnh mẫu trên đĩa (ví dụ: `"data/sample_frames/level_2_moderate.jpg"`) dùng cho kiểm thử offline hoặc stage demo.
-  - `default_severity_hint`: `int | None` — Mức độ ngập mặc định (`0..3`) dùng làm gợi ý khi kích hoạt mock polling nếu client không chỉ định rõ.
+  - `default_severity_hint`: `int | None` — Mức độ ngập mặc định (`0..3`) dùng làm gợi ý khi kích hoạt mock polling nếu client không chỉ định rõ `mock_severity_hint`.
 - **Response `200 OK`:**
   ```json
   {
-    "count": 7,
+    "count": 9,
     "items": [
       {
-        "camera_id": "cam_dn_001",
-        "name": "Ngã tư Hàm Nghi - Nguyễn Văn Linh",
-        "city": "Đà Nẵng",
+        "camera_id": "cam_hcm_001",
+        "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+        "city": "TP.HCM",
         "source": "public_traffic_camera",
         "feed_url": "https://camera.0511.vn",
-        "lat": 16.0604,
-        "lng": 108.2104,
-        "road_segment_id": "seg_dn_hnnvl_01",
+        "lat": 10.7858,
+        "lng": 106.7082,
+        "road_segment_id": "seg_hcm_nhc_01",
         "local_image_path": "data/sample_frames/level_2_moderate.jpg",
         "default_severity_hint": 2
       }
@@ -239,8 +243,10 @@ Lấy danh sách các điểm camera giao thông đang theo dõi (kèm tọa đ�
 ### 3.7. `POST /api/cameras/poll`
 Kích hoạt kiểm tra snapshot/frame mới nhất từ danh sách camera (hoặc một tập `camera_ids` chỉ định), đưa qua `ai-vision` phân tích và đồng bộ vào Firestore nếu phát hiện ngập (`severity_level >= 1`).
 - **Các trường mở rộng:**
-  - Request: `force_refresh: bool = False` — Nếu `true`, ép phân tích lại AI bỏ qua bộ đệm sai khác frame delta (frame-delta hash deduplication).
-  - Response item (`CameraPollResultItem`): `frame_delta_skipped: bool = False` — Đánh dấu frame không thay đổi so với lần poll trước (`delta < 0.04`) nên đã bỏ qua gọi AI để tiết kiệm quota.
+  - Request:
+    - `mock_severity_hint: int | None = None` — Gợi ý mức ngập (`0..3`) khi chạy mock fallback; nếu bỏ trống (`null`), hệ thống tự động lấy `default_severity_hint` của từng camera (hoặc mặc định `2`).
+    - `force_refresh: bool = False` — Nếu `true`, ép phân tích lại AI bỏ qua bộ đệm sai khác frame delta (frame-delta hash deduplication).
+  - Response item (`CameraPollResultItem`): `frame_delta_skipped: bool = False` — Đánh dấu frame không thay đổi so với lần poll trước (`delta < 0.04`) nên đã bỏ qua gọi AI mới và dùng lại kết quả phân tích liền trước để tiết kiệm quota.
 - **Request (`application/json`, tùy chọn body rỗng):**
   ```json
   {

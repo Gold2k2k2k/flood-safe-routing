@@ -65,6 +65,8 @@ export interface RouteResponse {
   rerouted: boolean;
   avoided_flood_zone_ids: string[];
   detour_waypoint_used?: LatLng | null;
+  detour_waypoints_used?: LatLng[];
+  baseline_route_coordinates?: LatLng[];
   distance_meters: number;
   duration_seconds: number;
   encoded_polyline: string;
@@ -81,17 +83,33 @@ export interface CameraItem {
   lat: number;
   lng: number;
   road_segment_id?: string | null;
+  local_image_path?: string | null;
+  default_severity_hint?: SeverityLevel | null;
+}
+
+export interface CameraPollRequest {
+  camera_ids?: string[] | null;
+  mock_severity_hint?: SeverityLevel | null;
+  force_refresh?: boolean;
+}
+
+export interface CameraPollResultItem {
+  camera_id: string;
+  frame_source: string;
+  analysis: FloodAnalysisResult;
+  broadcasted_to_firestore: boolean;
+  frame_delta_skipped: boolean;
 }
 
 export interface CameraPollResponse {
   polled_count: number;
   flooded_count: number;
-  results: Array<{
-    camera_id: string;
-    frame_source: string;
-    analysis: FloodAnalysisResult;
-    broadcasted_to_firestore: boolean;
-  }>;
+  results: CameraPollResultItem[];
+}
+
+export interface FloodZoneDeleteResponse {
+  deleted: boolean;
+  event_id: string;
 }
 
 export interface HeatmapPoint {

@@ -155,6 +155,106 @@ class TestRoutingGeometry(unittest.TestCase):
             )
             self.assertGreater(seg_dist, zone.radius_meters)
 
+    def test_multi_zone_consecutive_flood_detour_and_baseline_coordinates(self) -> None:
+        req = RouteRequest(
+            origin=LatLng(lat=10.7795, lng=106.7010),
+            destination=LatLng(lat=10.8065, lng=106.7315),
+            travel_mode="TWO_WHEELER",
+            avoid_flood_zones=True,
+        )
+        z1 = FloodZoneItem(
+            event_id="evt_001",
+            source="camera_ai",
+            camera_id="cam_hcm_001",
+            location_name="Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+            lat=10.7858,
+            lng=106.7082,
+            radius_meters=120.0,
+            severity_level=2,
+            visual_cue="Ngập nửa bánh xe máy",
+            estimated_depth_cm="20-35",
+            passable_for_motorbike=False,
+            confidence=0.91,
+            vision_model="gemini-3.8-flash",
+            status="active",
+            updated_at="2026-11-14T08:00:00+07:00",
+        )
+        z2 = FloodZoneItem(
+            event_id="evt_hcm_002",
+            source="camera_ai",
+            camera_id="cam_hcm_002",
+            location_name="Đường Quốc Hương - Xuân Thủy (Thảo Điền)",
+            lat=10.8032,
+            lng=106.7280,
+            radius_meters=130.0,
+            severity_level=3,
+            visual_cue="Ngập sâu lút bánh xe",
+            estimated_depth_cm=">35",
+            passable_for_motorbike=False,
+            confidence=0.94,
+            vision_model="gemini-3.8-flash",
+            status="active",
+            updated_at="2026-11-14T08:00:00+07:00",
+        )
+
+        res = asyncio.run(compute_safe_route(req, [z1, z2]))
+        self.assertTrue(res.rerouted)
+        self.assertEqual(res.baseline_route_coordinates, [req.origin, req.destination])
+        self.assertIn("evt_001", res.avoided_flood_zone_ids)
+        self.assertIn("evt_hcm_002", res.avoided_flood_zone_ids)
+        self.assertGreaterEqual(len(res.detour_waypoints_used), 2)
+        self.assertEqual(res.detour_waypoint_used, res.detour_waypoints_used[0])
+        self.assertEqual(
+            find_intersecting_flood_zones(res.route_coordinates, [z1, z2]), []
+        )
+
+    def test_secondary_adjacent_zone_avoided_during_detour(self) -> None:
+        origin = LatLng(lat=10.7800, lng=106.7000)
+        dest = LatLng(lat=10.7800, lng=106.7200)
+        primary_zone = _sample_flood_zone(severity=2, lat=10.7800, lng=106.7100)
+        # Place a second flooded zone directly on the +offset (North) perpendicular detour spot
+        cands = compute_detour_candidates(origin, dest, primary_zone, offset_meters=370.0)
+        blocked_side = cands[0]
+        adjacent_zone = FloodZoneItem(
+            event_id="evt_adjacent_block",
+            source="camera_ai",
+            location_name="Điểm ngập lân cận phía Bắc",
+            lat=blocked_side.lat,
+            lng=blocked_side.lng,
+            radius_meters=150.0,
+            severity_level=3,
+            visual_cue="Ngập sâu lút ống xả",
+            estimated_depth_cm=">35",
+            passable_for_motorbike=False,
+            confidence=0.95,
+            vision_model="gemini-3.8-flash",
+            status="active",
+            updated_at="2026-11-14T08:00:00+07:00",
+        )
+
+        req = RouteRequest(origin=origin, destination=dest, avoid_flood_zones=True)
+        res = asyncio.run(compute_safe_route(req, [primary_zone, adjacent_zone]))
+        self.assertTrue(res.rerouted)
+        self.assertEqual(
+            find_intersecting_flood_zones(
+                res.route_coordinates, [primary_zone, adjacent_zone]
+            ),
+            [],
+        )
+
+    def test_routes_api_v2_multi_via_waypoints_payload_constraints(self) -> None:
+        origin = LatLng(lat=10.7795, lng=106.7010)
+        dest = LatLng(lat=10.8065, lng=106.7315)
+        wps = [LatLng(lat=10.7837, lng=106.7106), LatLng(lat=10.8009, lng=106.7305)]
+        payload = build_routes_api_v2_payload(origin, dest, via_waypoints=wps)
+        self.assertNotIn("computeAlternativeRoutes", payload)
+        self.assertNotIn("optimizeWaypointOrder", payload)
+        self.assertEqual(len(payload["intermediates"]), 2)
+        for inter in payload["intermediates"]:
+            self.assertTrue(inter["via"])
+            self.assertIn("latLng", inter["location"])
+            self.assertNotIn("location", inter["location"])
+
     def test_compute_safe_route_raises_when_mock_disabled_and_key_missing(self) -> None:
         prev_mock = os.environ.get("USE_MOCK_FALLBACK")
         prev_key = os.environ.get("GOOGLE_MAPS_API_KEY")

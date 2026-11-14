@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { requestSafeRoute } from "../services/api";
 import type { FloodZoneItem, LatLng, RouteResponse } from "../types/flood";
 
@@ -8,14 +8,27 @@ interface UseAutoRerouteParams {
   zones: FloodZoneItem[];
 }
 
+function buildSevereZonesSignature(zones: FloodZoneItem[]): string {
+  return zones
+    .filter((z) => z.status === "active" && z.severity_level >= 2)
+    .map((z) => `${z.event_id}:${z.severity_level}:${z.lat.toFixed(5)}:${z.lng.toFixed(5)}`)
+    .sort()
+    .join("|");
+}
+
 export function useAutoReroute({ origin, destination, zones }: UseAutoRerouteParams) {
   const [routeResult, setRouteResult] = useState<RouteResponse | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const zonesRef = useRef<FloodZoneItem[]>(zones);
+  const lastEvaluatedSignatureRef = useRef<string>("");
+
+  zonesRef.current = zones;
 
   const computeRoute = useCallback(async () => {
     setLoadingRoute(true);
     setRouteError(null);
+    lastEvaluatedSignatureRef.current = buildSevereZonesSignature(zonesRef.current);
     try {
       const res = await requestSafeRoute({
         origin,
@@ -31,14 +44,11 @@ export function useAutoReroute({ origin, destination, zones }: UseAutoReroutePar
     }
   }, [origin, destination]);
 
-  // Automatically trigger live rerouting if a new severe flood zone appears that wasn't already avoided
+  // Automatically trigger live rerouting whenever the active severe flood zones change
   useEffect(() => {
     if (!routeResult) return;
-    const avoided = new Set(routeResult.avoided_flood_zone_ids);
-    const hasNewSevereZone = zones.some(
-      (z) => z.status === "active" && z.severity_level >= 2 && !avoided.has(z.event_id)
-    );
-    if (hasNewSevereZone) {
+    const currentSignature = buildSevereZonesSignature(zones);
+    if (currentSignature !== lastEvaluatedSignatureRef.current) {
       void computeRoute();
     }
   }, [zones, routeResult, computeRoute]);

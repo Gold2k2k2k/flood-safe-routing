@@ -1,8 +1,68 @@
 [
   {
+    "zone_id": "hcm_binh_thanh_nhc",
+    "city": "TP.HCM",
+    "district": "Bình Thạnh (Nguyễn Hữu Cảnh)",
+    "lat": 10.7858,
+    "lng": 106.7082,
+    "flood_frequency_30d": 16,
+    "avg_severity": 2.4,
+    "peak_trigger": "high_tide_and_rain"
+  },
+  {
+    "zone_id": "hcm_thu_duc_quoc_huong",
+    "city": "TP.HCM",
+    "district": "TP. Thủ Đức (Quốc Hương - Thảo Điền)",
+    "lat": 10.8032,
+    "lng": 106.7280,
+    "flood_frequency_30d": 19,
+    "avg_severity": 2.6,
+    "peak_trigger": "high_tide_and_rain"
+  },
+  {
+    "zone_id": "hcm_binh_thanh_uvk",
+    "city": "TP.HCM",
+    "district": "Bình Thạnh (Ung Văn Khiêm)",
+    "lat": 10.8015,
+    "lng": 106.7178,
+    "flood_frequency_30d": 14,
+    "avg_severity": 2.1,
+    "peak_trigger": "high_tide_and_rain"
+  },
+  {
+    "zone_id": "hcm_thu_duc_dxh",
+    "city": "TP.HCM",
+    "district": "TP. Thủ Đức (Đỗ Xuân Hợp)",
+    "lat": 10.8225,
+    "lng": 106.7705,
+    "flood_frequency_30d": 15,
+    "avg_severity": 2.2,
+    "peak_trigger": "heavy_rain"
+  },
+  {
+    "zone_id": "hcm_thu_duc_vvn",
+    "city": "TP.HCM",
+    "district": "TP. Thủ Đức (Võ Văn Ngân)",
+    "lat": 10.8505,
+    "lng": 106.7582,
+    "flood_frequency_30d": 11,
+    "avg_severity": 2.5,
+    "peak_trigger": "runoff_and_flash_flood"
+  },
+  {
+    "zone_id": "hcm_quan_7_htp",
+    "city": "TP.HCM",
+    "district": "Quận 7 (Huỳnh Tấn Phát)",
+    "lat": 10.7462,
+    "lng": 106.7275,
+    "flood_frequency_30d": 21,
+    "avg_severity": 2.3,
+    "peak_trigger": "high_tide"
+  },
+  {
     "zone_id": "dn_thanh_khe_hnnvl",
     "city": "Đà Nẵng",
-    "district": "Thanh Khê",
+    "district": "Thanh Khê (Hàm Nghi - Nguyễn Văn Linh)",
     "lat": 16.0604,
     "lng": 108.2104,
     "flood_frequency_30d": 14,
@@ -12,7 +72,7 @@
   {
     "zone_id": "dn_hai_chau_ldoik",
     "city": "Đà Nẵng",
-    "district": "Hải Châu",
+    "district": "Hải Châu (Lê Duẩn - Ông Ích Khiêm)",
     "lat": 16.0680,
     "lng": 108.2148,
     "flood_frequency_30d": 18,
@@ -20,29 +80,9 @@
     "peak_trigger": "heavy_rain"
   },
   {
-    "zone_id": "dn_thanh_khe_hpdbp",
-    "city": "Đà Nẵng",
-    "district": "Thanh Khê",
-    "lat": 16.0662,
-    "lng": 108.2025,
-    "flood_frequency_30d": 9,
-    "avg_severity": 1.8,
-    "peak_trigger": "heavy_rain"
-  },
-  {
-    "zone_id": "dn_hai_chau_nt",
-    "city": "Đà Nẵng",
-    "district": "Hải Châu",
-    "lat": 16.0435,
-    "lng": 108.2215,
-    "flood_frequency_30d": 11,
-    "avg_severity": 1.6,
-    "peak_trigger": "poor_drainage"
-  },
-  {
     "zone_id": "dn_lien_chieu_ms",
     "city": "Đà Nẵng",
-    "district": "Liên Chiểu",
+    "district": "Liên Chiểu (Mẹ Suốt)",
     "lat": 16.0540,
     "lng": 108.1585,
     "flood_frequency_30d": 22,
@@ -50,19 +90,9 @@
     "peak_trigger": "runoff_and_flash_flood"
   },
   {
-    "zone_id": "hcm_binh_thanh_nhc",
-    "city": "TP.HCM",
-    "district": "Bình Thạnh",
-    "lat": 10.7895,
-    "lng": 106.7124,
-    "flood_frequency_30d": 12,
-    "avg_severity": 2.3,
-    "peak_trigger": "high_tide_and_rain"
-  },
-  {
     "zone_id": "hn_thanh_xuan_nt",
     "city": "Hà Nội",
-    "district": "Thanh Xuân",
+    "district": "Thanh Xuân (Nguyễn Trãi)",
     "lat": 20.9912,
     "lng": 105.8027,
     "flood_frequency_30d": 8,

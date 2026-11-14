@@ -1,5 +1,65 @@
 [
   {
+    "camera_id": "cam_hcm_001",
+    "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+    "lat": 10.7858,
+    "lng": 106.7082,
+    "road_segment_id": "seg_hcm_nhc_01",
+    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+    "default_severity_hint": 2
+  },
+  {
+    "camera_id": "cam_hcm_002",
+    "name": "Đường Quốc Hương - Xuân Thủy (Thảo Điền)",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+    "lat": 10.8032,
+    "lng": 106.7280,
+    "road_segment_id": "seg_hcm_qh_01",
+    "local_image_path": "data/sample_frames/level_3_severe.jpg",
+    "default_severity_hint": 3
+  },
+  {
+    "camera_id": "cam_hcm_003",
+    "name": "Đường Ung Văn Khiêm - Nguyễn Gia Trí",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+    "lat": 10.8015,
+    "lng": 106.7178,
+    "road_segment_id": "seg_hcm_uvk_01",
+    "local_image_path": "data/sample_frames/level_1_minor.jpg",
+    "default_severity_hint": 1
+  },
+  {
+    "camera_id": "cam_hcm_004",
+    "name": "Đường Đỗ Xuân Hợp - Phước Long B",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+    "lat": 10.8225,
+    "lng": 106.7705,
+    "road_segment_id": "seg_hcm_dxh_01",
+    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+    "default_severity_hint": 2
+  },
+  {
+    "camera_id": "cam_hcm_005",
+    "name": "Đường Võ Văn Ngân (Chợ Thủ Đức)",
+    "city": "TP.HCM",
+    "source": "public_traffic_camera",
+    "feed_url": "https://giaothong.hochiminhcity.gov.vn",
+    "lat": 10.8505,
+    "lng": 106.7582,
+    "road_segment_id": "seg_hcm_vvn_01",
+    "local_image_path": "data/sample_frames/level_0_safe.jpg",
+    "default_severity_hint": 0
+  },
+  {
     "camera_id": "cam_dn_001",
     "name": "Ngã tư Hàm Nghi - Nguyễn Văn Linh",
     "city": "Đà Nẵng",
@@ -34,42 +94,6 @@
     "road_segment_id": "seg_dn_hpdbp_01",
     "local_image_path": "data/sample_frames/level_0_safe.jpg",
     "default_severity_hint": 0
-  },
-  {
-    "camera_id": "cam_dn_004",
-    "name": "Đường Núi Thành (Tiểu La - Phan Đăng Lưu)",
-    "city": "Đà Nẵng",
-    "source": "public_traffic_camera",
-    "feed_url": "https://camera.0511.vn",
-    "lat": 16.0435,
-    "lng": 108.2215,
-    "road_segment_id": "seg_dn_nt_01",
-    "local_image_path": "data/sample_frames/level_1_minor.jpg",
-    "default_severity_hint": 1
-  },
-  {
-    "camera_id": "cam_dn_005",
-    "name": "Đường Mẹ Suốt - Hòa Khánh Nam",
-    "city": "Đà Nẵng",
-    "source": "public_traffic_camera",
-    "feed_url": "https://camera.0511.vn",
-    "lat": 16.0540,
-    "lng": 108.1585,
-    "road_segment_id": "seg_dn_ms_01",
-    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
-    "default_severity_hint": 2
-  },
-  {
-    "camera_id": "cam_hcm_001",
-    "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
-    "city": "TP.HCM",
-    "source": "public_traffic_camera",
-    "feed_url": "https://camera.0511.vn",
-    "lat": 10.7858,
-    "lng": 106.7082,
-    "road_segment_id": "seg_hcm_nhc_01",
-    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
-    "default_severity_hint": 2
   },
   {
     "camera_id": "cam_hn_001",

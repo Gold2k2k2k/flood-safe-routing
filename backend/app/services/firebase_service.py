@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -16,6 +17,16 @@ from ..schemas import CameraItem, FloodZoneItem
 logger = logging.getLogger(__name__)
 _IN_MEMORY_ZONES: list[FloodZoneItem] | None = None
 _IN_MEMORY_HEATMAP: list[dict[str, Any]] | None = None
+
+
+def _approx_distance_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Fast spherical Haversine distance in meters for matching nearby flood history zones."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
 
 
 def _infer_city(lat: float, lng: float) -> str:
@@ -60,7 +71,8 @@ def _is_not_expired(ttl_expires_at: str | None) -> bool:
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
         return expires > datetime.now(timezone.utc)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Malformed ttl_expires_at '%s'; treating zone as active: %s", ttl_expires_at, exc)
         return True
 
 
@@ -142,6 +154,50 @@ def get_active_flood_zones() -> list[FloodZoneItem]:
     return [z for z in _IN_MEMORY_ZONES if z.status == "active" and _is_not_expired(z.ttl_expires_at)]
 
 
+def _accumulate_history_entry(
+    existing: dict[str, Any] | None,
+    zone: FloodZoneItem,
+    city: str,
+    target_zone_id: str,
+) -> dict[str, Any]:
+    """Increment flood_frequency_30d and recalculate running avg_severity and thermal weight."""
+    sev = float(zone.severity_level)
+    if existing is not None:
+        prev_freq = max(0, int(existing.get("flood_frequency_30d", 0)))
+        prev_avg = float(existing.get("avg_severity", sev))
+        new_freq = prev_freq + 1
+        new_avg = round(((prev_avg * prev_freq) + sev) / new_freq, 2)
+        district = existing.get("district")
+        if not district or district == "Unknown":
+            district = zone.location_name or "Khu vực ghi nhận ngập"
+        return {
+            **existing,
+            "zone_id": str(existing.get("zone_id") or target_zone_id),
+            "city": str(existing.get("city") or city),
+            "district": district,
+            "lat": float(existing.get("lat", zone.lat)),
+            "lng": float(existing.get("lng", zone.lng)),
+            "flood_frequency_30d": new_freq,
+            "avg_severity": new_avg,
+            "weight": round(new_freq * new_avg, 2),
+            "peak_trigger": existing.get("peak_trigger") or zone.source,
+            "recorded_at": zone.updated_at,
+        }
+
+    return {
+        "zone_id": target_zone_id,
+        "city": city,
+        "district": zone.location_name or "Khu vực ghi nhận ngập",
+        "lat": zone.lat,
+        "lng": zone.lng,
+        "flood_frequency_30d": 1,
+        "avg_severity": round(sev, 2),
+        "weight": round(sev, 2),
+        "peak_trigger": zone.source,
+        "recorded_at": zone.updated_at,
+    }
+
+
 def upsert_flood_zone(zone: FloodZoneItem) -> bool:
     """Save active flood zone in memory and broadcast to Firestore if configured."""
     global _IN_MEMORY_ZONES, _IN_MEMORY_HEATMAP
@@ -156,25 +212,39 @@ def upsert_flood_zone(zone: FloodZoneItem) -> bool:
     _IN_MEMORY_ZONES.append(zone)
 
     city = _infer_city(zone.lat, zone.lng)
+    target_zone_id = zone.camera_id or zone.event_id
 
-    # In mock mode or local state, keep in-memory heatmap history updated
+    # Accumulate flood_events_history in memory when severity_level >= 2
     if zone.severity_level >= 2:
         if _IN_MEMORY_HEATMAP is None:
             _IN_MEMORY_HEATMAP = _load_sample_heatmap()
-        hist_record = {
-            "zone_id": zone.event_id,
-            "city": city,
-            "district": zone.location_name or "Unknown",
-            "lat": zone.lat,
-            "lng": zone.lng,
-            "flood_frequency_30d": 1,
-            "avg_severity": float(zone.severity_level),
-            "weight": round(1.0 * float(zone.severity_level), 2),
-            "peak_trigger": zone.source,
-            "recorded_at": zone.updated_at,
-        }
-        _IN_MEMORY_HEATMAP = [h for h in _IN_MEMORY_HEATMAP if h.get("zone_id") != zone.event_id]
-        _IN_MEMORY_HEATMAP.append(hist_record)
+
+        matched_idx: int | None = None
+        for idx, h in enumerate(_IN_MEMORY_HEATMAP):
+            hid = h.get("zone_id")
+            if hid in (zone.event_id, zone.camera_id):
+                matched_idx = idx
+                break
+            dist_m = _approx_distance_meters(
+                float(h.get("lat", 0.0)),
+                float(h.get("lng", 0.0)),
+                zone.lat,
+                zone.lng,
+            )
+            if dist_m <= 300.0:
+                matched_idx = idx
+                break
+
+        if matched_idx is not None:
+            existing_entry = _IN_MEMORY_HEATMAP[matched_idx]
+            target_zone_id = str(existing_entry.get("zone_id") or target_zone_id)
+            _IN_MEMORY_HEATMAP[matched_idx] = _accumulate_history_entry(
+                existing_entry, zone, city, target_zone_id
+            )
+        else:
+            _IN_MEMORY_HEATMAP.append(
+                _accumulate_history_entry(None, zone, city, target_zone_id)
+            )
 
     if not _require_firestore_or_mock():
         return False
@@ -185,20 +255,13 @@ def upsert_flood_zone(zone: FloodZoneItem) -> bool:
             zone.model_dump()
         )
         if zone.severity_level >= 2:
-            db.collection("flood_events_history").document(zone.event_id).set(
-                {
-                    "zone_id": zone.event_id,
-                    "city": city,
-                    "district": zone.location_name or "Unknown",
-                    "lat": zone.lat,
-                    "lng": zone.lng,
-                    "flood_frequency_30d": 1,
-                    "avg_severity": float(zone.severity_level),
-                    "peak_trigger": zone.source,
-                    "recorded_at": zone.updated_at,
-                },
-                merge=True,
+            hist_ref = db.collection("flood_events_history").document(target_zone_id)
+            snap = hist_ref.get()
+            existing_doc = (snap.to_dict() or {}) if getattr(snap, "exists", False) else None
+            updated_hist = _accumulate_history_entry(
+                existing_doc, zone, city, target_zone_id
             )
+            hist_ref.set(updated_hist, merge=True)
         return True
     except Exception as exc:
         logger.warning("Failed to broadcast flood zone %s to Firestore: %s", zone.event_id, exc)

@@ -1,19 +1,24 @@
 """
 FastAPI Main Entrypoint for Flood-Safe Routing.
 Implements all endpoints defined in docs/api-and-data-contract.md with non-blocking
-async AI inference, strict RuntimeError -> 503 handling, and camera polling.
+async AI inference, strict RuntimeError -> 503 handling, frame-delta camera polling,
+and stage demo lifecycle controls.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from .config import ROOT_DIR, settings
 from .schemas import (
@@ -23,6 +28,7 @@ from .schemas import (
     CameraPollResultItem,
     CrowdsourcingReportRequest,
     CrowdsourcingReportResponse,
+    FloodZoneDeleteResponse,
     FloodZoneItem,
     FloodZonesListResponse,
     HeatmapResponse,
@@ -39,6 +45,8 @@ from .services.firebase_service import (
 )
 from .services.routing_service import compute_safe_route
 
+logger = logging.getLogger(__name__)
+
 # Load ai-vision modules cleanly without colliding with generic `src` packages
 _AI_VISION_ROOT = ROOT_DIR / "ai-vision"
 if str(_AI_VISION_ROOT) not in sys.path:
@@ -48,6 +56,8 @@ from src.analyzer import analyze_flood_image_async  # type: ignore
 from src.camera_extractor import (  # type: ignore
     clear_camera_frame_cache,
     extract_frame_for_camera,
+    get_cached_camera_analysis,
+    record_camera_frame_analysis,
     should_skip_unchanged_frame,
 )
 
@@ -71,8 +81,136 @@ async def handle_runtime_config_error(_: Request, exc: RuntimeError) -> JSONResp
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
+def _build_zone_from_analysis(
+    *,
+    event_id: str,
+    source: str,
+    camera_id: str | None,
+    location_name: str,
+    lat: float,
+    lng: float,
+    analysis: Any,
+) -> FloodZoneItem | None:
+    """
+    Convert an AI FloodAnalysisResult into an active FloodZoneItem, applying the
+    FLOOD_ALERT_THRESHOLD confidence guardrail so blurry/low-confidence frames
+    do not falsely block roads with severity >= 2.
+    """
+    if analysis.severity_level < 1:
+        return None
+
+    low_conf = float(analysis.confidence) < settings.FLOOD_ALERT_THRESHOLD
+    if low_conf and analysis.severity_level == 1:
+        logger.info(
+            "Skipping low-confidence minor flood report %s (confidence=%.2f < %.2f)",
+            event_id,
+            analysis.confidence,
+            settings.FLOOD_ALERT_THRESHOLD,
+        )
+        return None
+
+    effective_severity = analysis.severity_level
+    effective_passable = analysis.passable_for_motorbike
+    effective_cue = analysis.visual_cue
+    if low_conf and effective_severity >= 2:
+        logger.warning(
+            "Downgrading low-confidence flood alert %s from level %d to 1 (confidence=%.2f < %.2f)",
+            event_id,
+            effective_severity,
+            analysis.confidence,
+            settings.FLOOD_ALERT_THRESHOLD,
+        )
+        effective_severity = 1
+        effective_passable = True
+        effective_cue = f"{analysis.visual_cue} (Cần xác minh thêm - độ tin cậy thấp)"
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=settings.FLOOD_ZONE_TTL_MINUTES)
+    return FloodZoneItem(
+        event_id=event_id,
+        source=source,
+        camera_id=camera_id,
+        location_name=location_name,
+        lat=lat,
+        lng=lng,
+        radius_meters=120.0,
+        severity_level=effective_severity,
+        visual_cue=effective_cue,
+        estimated_depth_cm=analysis.estimated_depth_cm,
+        passable_for_motorbike=effective_passable,
+        confidence=analysis.confidence,
+        vision_model=analysis.vision_model,
+        status="active",
+        updated_at=now.isoformat(),
+        ttl_expires_at=expires.isoformat(),
+    )
+
+
+async def _parse_report_payload(
+    request: Request,
+) -> tuple[CrowdsourcingReportRequest, bytes | None, str]:
+    """Support both application/json (base64) and multipart/form-data (UploadFile) report submissions."""
+    content_type = request.headers.get("content-type", "").lower()
+    img_bytes: bytes | None = None
+    mime_type = "image/jpeg"
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        try:
+            raw_data: dict[str, Any] = {}
+            for key in (
+                "lat",
+                "lng",
+                "location_name",
+                "reporter_note",
+                "image_base64",
+                "mock_severity_hint",
+            ):
+                val = form.get(key)
+                if isinstance(val, str) and val != "":
+                    raw_data[key] = val
+
+            upload = form.get("image") or form.get("file")
+            if upload is not None and hasattr(upload, "read"):
+                img_bytes = await upload.read()  # type: ignore[union-attr]
+                upload_ct = getattr(upload, "content_type", None)
+                if isinstance(upload_ct, str) and upload_ct.startswith("image/"):
+                    mime_type = upload_ct
+
+            try:
+                payload = CrowdsourcingReportRequest.model_validate(raw_data)
+            except ValidationError as exc:
+                raise RequestValidationError(exc.errors()) from exc
+        finally:
+            await form.close()
+    else:
+        try:
+            body_json = await request.json()
+        except Exception as exc:
+            raise RequestValidationError(
+                [{"loc": ("body",), "msg": f"Invalid JSON body: {exc}", "type": "value_error.jsondecode"}]
+            ) from exc
+        try:
+            payload = CrowdsourcingReportRequest.model_validate(body_json)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
+
+    if img_bytes is None and payload.image_base64:
+        header_and_data = payload.image_base64.split(",", 1)
+        if len(header_and_data) == 2 and "image/" in header_and_data[0]:
+            mime_type = header_and_data[0].split(";")[0].replace("data:", "").strip() or "image/jpeg"
+        raw_b64 = header_and_data[-1]
+        try:
+            img_bytes = base64.b64decode(raw_b64)
+        except Exception as exc:
+            logger.warning("Invalid base64 image in /api/reports; ignoring image_base64: %s", exc)
+            img_bytes = None
+
+    return payload, img_bytes, mime_type
+
+
 @app.get("/api/health")
-async def health_check() -> dict:
+async def health_check() -> dict[str, Any]:
     return {
         "status": "ok",
         "mock_fallback_enabled": settings.USE_MOCK_FALLBACK,
@@ -91,46 +229,70 @@ async def list_flood_zones() -> FloodZonesListResponse:
     return FloodZonesListResponse(count=len(zones), items=zones)
 
 
-@app.post("/api/reports", response_model=CrowdsourcingReportResponse)
-async def create_crowdsourced_report(
-    payload: CrowdsourcingReportRequest,
-) -> CrowdsourcingReportResponse:
-    img_bytes: bytes | None = None
-    if payload.image_base64:
-        raw_b64 = payload.image_base64.split(",")[-1]
-        try:
-            img_bytes = base64.b64decode(raw_b64)
-        except Exception:
-            img_bytes = None
+@app.post("/api/flood-zones/reset", response_model=FloodZonesListResponse)
+async def reset_flood_zones() -> FloodZonesListResponse:
+    """Reset active flood zones, heatmap history, and camera frame cache back to initial sample state."""
+    clear_camera_frame_cache()
+    zones = reset_flood_zones_to_sample()
+    return FloodZonesListResponse(count=len(zones), items=zones)
+
+
+@app.delete("/api/flood-zones/{event_id}", response_model=FloodZoneDeleteResponse)
+async def remove_flood_zone(event_id: str) -> FloodZoneDeleteResponse:
+    """Resolve/delete a specific active flood zone by event_id."""
+    deleted = delete_flood_zone(event_id)
+    return FloodZoneDeleteResponse(deleted=deleted, event_id=event_id)
+
+
+@app.post(
+    "/api/reports",
+    response_model=CrowdsourcingReportResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": CrowdsourcingReportRequest.model_json_schema()
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["lat", "lng"],
+                        "properties": {
+                            "lat": {"type": "number"},
+                            "lng": {"type": "number"},
+                            "location_name": {"type": "string"},
+                            "reporter_note": {"type": "string"},
+                            "mock_severity_hint": {"type": "integer", "minimum": 0, "maximum": 3},
+                            "image": {"type": "string", "format": "binary"},
+                        },
+                    }
+                },
+            },
+        }
+    },
+)
+async def create_crowdsourced_report(request: Request) -> CrowdsourcingReportResponse:
+    payload, img_bytes, mime_type = await _parse_report_payload(request)
 
     analysis = await analyze_flood_image_async(
         image_bytes=img_bytes,
+        mime_type=mime_type,
         mock_severity_hint=payload.mock_severity_hint,
     )
 
     report_id = f"rep_{uuid.uuid4().hex[:6]}"
     broadcasted = False
-    if analysis.severity_level >= 1:
-        now = datetime.now(timezone.utc)
-        expires = now + timedelta(minutes=settings.FLOOD_ZONE_TTL_MINUTES)
-        new_zone = FloodZoneItem(
-            event_id=report_id,
-            source="crowdsourcing_ai",
-            camera_id=None,
-            location_name=payload.location_name,
-            lat=payload.lat,
-            lng=payload.lng,
-            radius_meters=120.0,
-            severity_level=analysis.severity_level,
-            visual_cue=analysis.visual_cue,
-            estimated_depth_cm=analysis.estimated_depth_cm,
-            passable_for_motorbike=analysis.passable_for_motorbike,
-            confidence=analysis.confidence,
-            vision_model=analysis.vision_model,
-            status="active",
-            updated_at=now.isoformat(),
-            ttl_expires_at=expires.isoformat(),
-        )
+    new_zone = _build_zone_from_analysis(
+        event_id=report_id,
+        source="crowdsourcing_ai",
+        camera_id=None,
+        location_name=payload.location_name,
+        lat=payload.lat,
+        lng=payload.lng,
+        analysis=analysis,
+    )
+    if new_zone is not None:
         broadcasted = upsert_flood_zone(new_zone)
 
     return CrowdsourcingReportResponse(
@@ -160,35 +322,69 @@ async def poll_cameras(
     flooded_count = 0
 
     for cam in cameras:
+        effective_hint = (
+            req.mock_severity_hint
+            if req.mock_severity_hint is not None
+            else (
+                cam.default_severity_hint
+                if cam.default_severity_hint is not None
+                else 2
+            )
+        )
         frame_bytes, frame_source = await extract_frame_for_camera(cam.model_dump())
+
+        cached_analysis = get_cached_camera_analysis(cam.camera_id)
+        hint_changed_in_mock = (
+            not settings.gemini_configured
+            and req.mock_severity_hint is not None
+            and cached_analysis is not None
+            and req.mock_severity_hint != cached_analysis.severity_level
+        )
+
+        if (
+            not req.force_refresh
+            and cached_analysis is not None
+            and not hint_changed_in_mock
+            and should_skip_unchanged_frame(
+                cam.camera_id, frame_bytes, commit_frame=False
+            )
+        ):
+            if cached_analysis.severity_level >= 1:
+                flooded_count += 1
+            results.append(
+                CameraPollResultItem(
+                    camera_id=cam.camera_id,
+                    frame_source=frame_source,
+                    analysis=cached_analysis.model_dump(),
+                    broadcasted_to_firestore=False,
+                    frame_delta_skipped=True,
+                )
+            )
+            continue
+
         analysis = await analyze_flood_image_async(
             image_bytes=frame_bytes,
-            mock_severity_hint=req.mock_severity_hint,
+            mock_severity_hint=effective_hint,
         )
+        record_camera_frame_analysis(cam.camera_id, frame_bytes, analysis)
+
         broadcasted = False
+        event_id = f"cam_evt_{cam.camera_id}"
         if analysis.severity_level >= 1:
             flooded_count += 1
-            now = datetime.now(timezone.utc)
-            expires = now + timedelta(minutes=settings.FLOOD_ZONE_TTL_MINUTES)
-            zone = FloodZoneItem(
-                event_id=f"cam_evt_{cam.camera_id}",
+            zone = _build_zone_from_analysis(
+                event_id=event_id,
                 source="camera_ai",
                 camera_id=cam.camera_id,
                 location_name=cam.name,
                 lat=cam.lat,
                 lng=cam.lng,
-                radius_meters=120.0,
-                severity_level=analysis.severity_level,
-                visual_cue=analysis.visual_cue,
-                estimated_depth_cm=analysis.estimated_depth_cm,
-                passable_for_motorbike=analysis.passable_for_motorbike,
-                confidence=analysis.confidence,
-                vision_model=analysis.vision_model,
-                status="active",
-                updated_at=now.isoformat(),
-                ttl_expires_at=expires.isoformat(),
+                analysis=analysis,
             )
-            broadcasted = upsert_flood_zone(zone)
+            if zone is not None:
+                broadcasted = upsert_flood_zone(zone)
+        else:
+            delete_flood_zone(event_id)
 
         results.append(
             CameraPollResultItem(
@@ -196,6 +392,7 @@ async def poll_cameras(
                 frame_source=frame_source,
                 analysis=analysis.model_dump(),
                 broadcasted_to_firestore=broadcasted,
+                frame_delta_skipped=False,
             )
         )
 

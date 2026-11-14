@@ -35,6 +35,11 @@ class FloodZonesListResponse(BaseModel):
     items: list[FloodZoneItem]
 
 
+class FloodZoneDeleteResponse(BaseModel):
+    deleted: bool
+    event_id: str
+
+
 class CrowdsourcingReportRequest(BaseModel):
     lat: float
     lng: float
@@ -90,7 +95,7 @@ class CameraListResponse(BaseModel):
 
 class CameraPollRequest(BaseModel):
     camera_ids: list[str] | None = None
-    mock_severity_hint: int = Field(default=2, ge=0, le=3)
+    mock_severity_hint: int | None = Field(default=None, ge=0, le=3)
     force_refresh: bool = False
 
 
