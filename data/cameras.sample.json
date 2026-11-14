@@ -1,5 +1,65 @@
 [
   {
+    "camera_id": "cam_dn_001",
+    "name": "Ngã tư Hàm Nghi - Nguyễn Văn Linh",
+    "city": "Đà Nẵng",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 16.0604,
+    "lng": 108.2104,
+    "road_segment_id": "seg_dn_hnnvl_01",
+    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+    "default_severity_hint": 2
+  },
+  {
+    "camera_id": "cam_dn_002",
+    "name": "Ngã tư Lê Duẩn - Ông Ích Khiêm",
+    "city": "Đà Nẵng",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 16.0680,
+    "lng": 108.2148,
+    "road_segment_id": "seg_dn_ldoik_01",
+    "local_image_path": "data/sample_frames/level_3_severe.jpg",
+    "default_severity_hint": 3
+  },
+  {
+    "camera_id": "cam_dn_003",
+    "name": "Nút giao Hải Phòng - Điện Biên Phủ",
+    "city": "Đà Nẵng",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 16.0662,
+    "lng": 108.2025,
+    "road_segment_id": "seg_dn_hpdbp_01",
+    "local_image_path": "data/sample_frames/level_0_safe.jpg",
+    "default_severity_hint": 0
+  },
+  {
+    "camera_id": "cam_dn_004",
+    "name": "Đường Núi Thành (Tiểu La - Phan Đăng Lưu)",
+    "city": "Đà Nẵng",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 16.0435,
+    "lng": 108.2215,
+    "road_segment_id": "seg_dn_nt_01",
+    "local_image_path": "data/sample_frames/level_1_minor.jpg",
+    "default_severity_hint": 1
+  },
+  {
+    "camera_id": "cam_dn_005",
+    "name": "Đường Mẹ Suốt - Hòa Khánh Nam",
+    "city": "Đà Nẵng",
+    "source": "public_traffic_camera",
+    "feed_url": "https://camera.0511.vn",
+    "lat": 16.0540,
+    "lng": 108.1585,
+    "road_segment_id": "seg_dn_ms_01",
+    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+    "default_severity_hint": 2
+  },
+  {
     "camera_id": "cam_hcm_001",
     "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
     "city": "TP.HCM",
@@ -7,7 +67,9 @@
     "feed_url": "https://camera.0511.vn",
     "lat": 10.7858,
     "lng": 106.7082,
-    "road_segment_id": "seg_hcm_nhc_01"
+    "road_segment_id": "seg_hcm_nhc_01",
+    "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+    "default_severity_hint": 2
   },
   {
     "camera_id": "cam_hn_001",
@@ -17,6 +79,8 @@
     "feed_url": "https://camera.0511.vn",
     "lat": 20.9912,
     "lng": 105.8027,
-    "road_segment_id": "seg_hn_nt_01"
+    "road_segment_id": "seg_hn_nt_01",
+    "local_image_path": "data/sample_frames/level_1_minor.jpg",
+    "default_severity_hint": 1
   }
 ]

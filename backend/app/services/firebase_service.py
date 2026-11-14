@@ -15,6 +15,16 @@ from ..schemas import CameraItem, FloodZoneItem
 
 logger = logging.getLogger(__name__)
 _IN_MEMORY_ZONES: list[FloodZoneItem] | None = None
+_IN_MEMORY_HEATMAP: list[dict[str, Any]] | None = None
+
+
+def _infer_city(lat: float, lng: float) -> str:
+    """Infer Vietnamese municipality from geographic coordinates."""
+    if 15.5 <= lat <= 16.5:
+        return "Đà Nẵng"
+    if lat >= 20.0:
+        return "Hà Nội"
+    return "TP.HCM"
 
 
 def _require_firestore_or_mock() -> bool:
@@ -93,6 +103,18 @@ def _load_sample_flood_zones() -> list[FloodZoneItem]:
     return zones
 
 
+def _load_sample_heatmap() -> list[dict[str, Any]]:
+    heatmap_path = ROOT_DIR / "data" / "heatmap_history.sample.json"
+    if not heatmap_path.exists():
+        return []
+    items = json.loads(heatmap_path.read_text(encoding="utf-8"))
+    for item in items:
+        freq = float(item.get("flood_frequency_30d", 1))
+        sev = float(item.get("avg_severity", 1.0))
+        item["weight"] = round(freq * sev, 2)
+    return items
+
+
 def get_active_flood_zones() -> list[FloodZoneItem]:
     global _IN_MEMORY_ZONES
     if _require_firestore_or_mock():
@@ -122,7 +144,7 @@ def get_active_flood_zones() -> list[FloodZoneItem]:
 
 def upsert_flood_zone(zone: FloodZoneItem) -> bool:
     """Save active flood zone in memory and broadcast to Firestore if configured."""
-    global _IN_MEMORY_ZONES
+    global _IN_MEMORY_ZONES, _IN_MEMORY_HEATMAP
     if not zone.ttl_expires_at:
         zone.ttl_expires_at = (
             datetime.now(timezone.utc) + timedelta(minutes=settings.FLOOD_ZONE_TTL_MINUTES)
@@ -132,6 +154,27 @@ def upsert_flood_zone(zone: FloodZoneItem) -> bool:
         _IN_MEMORY_ZONES = _load_sample_flood_zones()
     _IN_MEMORY_ZONES = [z for z in _IN_MEMORY_ZONES if z.event_id != zone.event_id]
     _IN_MEMORY_ZONES.append(zone)
+
+    city = _infer_city(zone.lat, zone.lng)
+
+    # In mock mode or local state, keep in-memory heatmap history updated
+    if zone.severity_level >= 2:
+        if _IN_MEMORY_HEATMAP is None:
+            _IN_MEMORY_HEATMAP = _load_sample_heatmap()
+        hist_record = {
+            "zone_id": zone.event_id,
+            "city": city,
+            "district": zone.location_name or "Unknown",
+            "lat": zone.lat,
+            "lng": zone.lng,
+            "flood_frequency_30d": 1,
+            "avg_severity": float(zone.severity_level),
+            "weight": round(1.0 * float(zone.severity_level), 2),
+            "peak_trigger": zone.source,
+            "recorded_at": zone.updated_at,
+        }
+        _IN_MEMORY_HEATMAP = [h for h in _IN_MEMORY_HEATMAP if h.get("zone_id") != zone.event_id]
+        _IN_MEMORY_HEATMAP.append(hist_record)
 
     if not _require_firestore_or_mock():
         return False
@@ -145,7 +188,7 @@ def upsert_flood_zone(zone: FloodZoneItem) -> bool:
             db.collection("flood_events_history").document(zone.event_id).set(
                 {
                     "zone_id": zone.event_id,
-                    "city": "TP.HCM",
+                    "city": city,
                     "district": zone.location_name or "Unknown",
                     "lat": zone.lat,
                     "lng": zone.lng,
@@ -162,6 +205,55 @@ def upsert_flood_zone(zone: FloodZoneItem) -> bool:
         if not settings.USE_MOCK_FALLBACK:
             raise RuntimeError(f"Firestore write failed: {exc}") from exc
         return False
+
+
+def delete_flood_zone(event_id: str) -> bool:
+    """Delete an active flood zone from in-memory state and Firestore if configured."""
+    global _IN_MEMORY_ZONES
+    if _IN_MEMORY_ZONES is None:
+        _IN_MEMORY_ZONES = _load_sample_flood_zones()
+    initial_count = len(_IN_MEMORY_ZONES)
+    _IN_MEMORY_ZONES = [z for z in _IN_MEMORY_ZONES if z.event_id != event_id]
+    deleted_in_mem = len(_IN_MEMORY_ZONES) < initial_count
+
+    if _require_firestore_or_mock():
+        try:
+            db = _get_firestore_client()
+            db.collection("active_flood_zones").document(event_id).delete()
+            return True
+        except Exception as exc:
+            logger.warning("Failed to delete flood zone %s from Firestore: %s", event_id, exc)
+            if not settings.USE_MOCK_FALLBACK:
+                raise RuntimeError(f"Firestore delete failed: {exc}") from exc
+            return False
+
+    return deleted_in_mem
+
+
+def reset_flood_zones_to_sample() -> list[FloodZoneItem]:
+    """Reset active flood zones and in-memory heatmap back to seed sample datasets."""
+    global _IN_MEMORY_ZONES, _IN_MEMORY_HEATMAP
+    _IN_MEMORY_ZONES = _load_sample_flood_zones()
+    _IN_MEMORY_HEATMAP = _load_sample_heatmap()
+
+    if _require_firestore_or_mock():
+        try:
+            db = _get_firestore_client()
+            batch = db.batch()
+            for doc in db.collection("active_flood_zones").stream():
+                batch.delete(doc.reference)
+            for zone in _IN_MEMORY_ZONES:
+                batch.set(
+                    db.collection("active_flood_zones").document(zone.event_id),
+                    zone.model_dump(),
+                )
+            batch.commit()
+        except Exception as exc:
+            logger.warning("Failed to reset Firestore flood zones: %s", exc)
+            if not settings.USE_MOCK_FALLBACK:
+                raise RuntimeError(f"Firestore reset failed: {exc}") from exc
+
+    return list(_IN_MEMORY_ZONES)
 
 
 def get_cameras() -> list[CameraItem]:
@@ -184,6 +276,7 @@ def get_cameras() -> list[CameraItem]:
 
 
 def get_heatmap_points() -> list[dict[str, Any]]:
+    global _IN_MEMORY_HEATMAP
     if _require_firestore_or_mock():
         try:
             db = _get_firestore_client()
@@ -200,12 +293,6 @@ def get_heatmap_points() -> list[dict[str, Any]]:
             if not settings.USE_MOCK_FALLBACK:
                 raise RuntimeError(f"Firestore heatmap lookup failed: {exc}") from exc
 
-    heatmap_path = ROOT_DIR / "data" / "heatmap_history.sample.json"
-    if not heatmap_path.exists():
-        return []
-    items = json.loads(heatmap_path.read_text(encoding="utf-8"))
-    for item in items:
-        freq = float(item.get("flood_frequency_30d", 1))
-        sev = float(item.get("avg_severity", 1.0))
-        item["weight"] = round(freq * sev, 2)
-    return items
+    if _IN_MEMORY_HEATMAP is None:
+        _IN_MEMORY_HEATMAP = _load_sample_heatmap()
+    return list(_IN_MEMORY_HEATMAP)

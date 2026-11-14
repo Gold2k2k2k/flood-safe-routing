@@ -8,7 +8,9 @@
         "source": "camera_ai",
         "vision_model": "gemini-3.8-flash",
         "camera_id": "cam_hcm_001",
+        "location_name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
         "severity_level": 2,
+        "radius_meters": 120.0,
         "visual_cue": "Nước ngập quá mép lề đường và chạm nửa bánh xe máy",
         "estimated_depth_cm": "20-35",
         "passable_for_motorbike": false,
@@ -19,6 +21,72 @@
       "geometry": {
         "type": "Point",
         "coordinates": [106.7082, 10.7858]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "event_id": "evt_dn_001",
+        "source": "camera_ai",
+        "vision_model": "gemini-3.8-flash",
+        "camera_id": "cam_dn_001",
+        "location_name": "Ngã tư Hàm Nghi - Nguyễn Văn Linh",
+        "severity_level": 2,
+        "radius_meters": 130.0,
+        "visual_cue": "Nước ngập quá mép lề đường và chạm nửa bánh xe máy",
+        "estimated_depth_cm": "20-35",
+        "passable_for_motorbike": false,
+        "confidence": 0.92,
+        "status": "active",
+        "updated_at": "2026-11-14T01:30:00+07:00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [108.2104, 16.0604]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "event_id": "evt_dn_002",
+        "source": "camera_ai",
+        "vision_model": "gemini-3.8-flash",
+        "camera_id": "cam_dn_002",
+        "location_name": "Ngã tư Lê Duẩn - Ông Ích Khiêm",
+        "severity_level": 3,
+        "radius_meters": 140.0,
+        "visual_cue": "Nước ngập sâu lút bánh xe máy, ngập ống xả và lốc máy",
+        "estimated_depth_cm": ">35",
+        "passable_for_motorbike": false,
+        "confidence": 0.95,
+        "status": "active",
+        "updated_at": "2026-11-14T01:30:00+07:00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [108.2148, 16.0680]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "event_id": "evt_dn_003",
+        "source": "camera_ai",
+        "vision_model": "gemini-3.8-flash",
+        "camera_id": "cam_dn_004",
+        "location_name": "Đường Núi Thành (Tiểu La - Phan Đăng Lưu)",
+        "severity_level": 1,
+        "radius_meters": 100.0,
+        "visual_cue": "Nước đọng sát mép vỉa hè, xe máy đi chậm qua được",
+        "estimated_depth_cm": "5-15",
+        "passable_for_motorbike": true,
+        "confidence": 0.88,
+        "status": "active",
+        "updated_at": "2026-11-14T01:30:00+07:00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [108.2215, 16.0435]
       }
     }
   ]

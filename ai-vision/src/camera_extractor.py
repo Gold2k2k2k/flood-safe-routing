@@ -15,6 +15,37 @@ from PIL import Image, ImageChops
 
 logger = logging.getLogger(__name__)
 
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+
+_LAST_CAMERA_FRAMES: dict[str, bytes] = {}
+
+
+def clear_camera_frame_cache() -> None:
+    """Clear in-memory camera frame cache, e.g. for demo resets or tests."""
+    _LAST_CAMERA_FRAMES.clear()
+
+
+def should_skip_unchanged_frame(
+    camera_id: str,
+    curr_bytes: bytes | None,
+    threshold: float = 0.04,
+) -> bool:
+    """
+    Check if camera frame is virtually identical to the previous frame.
+    If curr_bytes is None, returns False.
+    If previous frame exists and delta < threshold, returns True (skip).
+    Otherwise caches curr_bytes and returns False (proceed).
+    """
+    if not curr_bytes:
+        return False
+    prev = _LAST_CAMERA_FRAMES.get(camera_id)
+    if prev is not None:
+        delta = compute_frame_delta(prev, curr_bytes)
+        if delta < threshold:
+            return True
+    _LAST_CAMERA_FRAMES[camera_id] = curr_bytes
+    return False
+
 
 async def fetch_camera_snapshot(feed_url: str, timeout_sec: float = 8.0) -> bytes | None:
     """
@@ -40,6 +71,8 @@ async def fetch_camera_snapshot(feed_url: str, timeout_sec: float = 8.0) -> byte
 def load_local_frame(frame_path: str | Path) -> bytes | None:
     """Load a real flood frame from disk for deterministic stage demos."""
     p = Path(frame_path)
+    if not p.is_absolute() and not p.exists():
+        p = ROOT_DIR / p
     if p.exists() and p.is_file():
         return p.read_bytes()
     return None
@@ -84,7 +117,10 @@ def compute_frame_delta(prev_bytes: bytes, curr_bytes: bytes) -> float:
             g1 = img1.convert("L").resize((32, 32))
             g2 = img2.convert("L").resize((32, 32))
             diff = ImageChops.difference(g1, g2)
-            pixels = list(diff.getdata())
+            if hasattr(diff, "get_flattened_data"):
+                pixels = list(diff.get_flattened_data())
+            else:
+                pixels = list(diff.getdata())
             if not pixels:
                 return 1.0
             return sum(pixels) / (len(pixels) * 255.0)
@@ -105,7 +141,10 @@ async def extract_frame_for_camera(camera_meta: dict[str, Any]) -> tuple[bytes |
 
     local_video = camera_meta.get("local_video_path")
     if local_video:
-        raw = extract_frame_from_video(str(local_video))
+        vp = Path(local_video)
+        if not vp.is_absolute() and not vp.exists():
+            vp = ROOT_DIR / vp
+        raw = extract_frame_from_video(str(vp))
         if raw:
             return raw, "local_video"
 

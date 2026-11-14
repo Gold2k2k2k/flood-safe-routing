@@ -30,9 +30,11 @@ from .schemas import (
     RouteResponse,
 )
 from .services.firebase_service import (
+    delete_flood_zone,
     get_active_flood_zones,
     get_cameras,
     get_heatmap_points,
+    reset_flood_zones_to_sample,
     upsert_flood_zone,
 )
 from .services.routing_service import compute_safe_route
@@ -43,7 +45,11 @@ if str(_AI_VISION_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_VISION_ROOT))
 
 from src.analyzer import analyze_flood_image_async  # type: ignore
-from src.camera_extractor import extract_frame_for_camera  # type: ignore
+from src.camera_extractor import (  # type: ignore
+    clear_camera_frame_cache,
+    extract_frame_for_camera,
+    should_skip_unchanged_frame,
+)
 
 app = FastAPI(
     title="Flood-Safe Routing API",

@@ -151,6 +151,10 @@ Người dân / tài xế gửi báo cáo ngập kèm ảnh hiện trường (ho
 
 ### 3.4. `POST /api/route` (Dynamic Rerouting)
 Tính toán lộ trình an toàn cho xe máy (`TWO_WHEELER`), tự động kiểm tra giao cắt với các điểm ngập đỏ (`severity_level >= 2`) và bẻ hướng nếu cần.
+- **Các trường mở rộng trong `RouteResponse`:**
+  - `baseline_route_coordinates`: `list[LatLng]` — Danh sách tọa độ của lộ trình trực tiếp ban đầu (trước khi né ngập), dùng để frontend vẽ đường nét đứt đỏ so sánh trước/sau khi né ngập.
+  - `detour_waypoints_used`: `list[LatLng]` — Danh sách toàn bộ các điểm vòng tránh (`via` detour waypoints) được chèn vào lộ trình khi né một hoặc nhiều vùng ngập.
+  - `detour_waypoint_used`: `LatLng | None` — Điểm vòng tránh đầu tiên (giữ lại để đảm bảo tương thích ngược).
 - **Request (`application/json`):**
   ```json
   {
@@ -166,6 +170,13 @@ Tính toán lộ trình an toàn cho xe máy (`TWO_WHEELER`), tự động kiể
     "rerouted": true,
     "avoided_flood_zone_ids": ["evt_001"],
     "detour_waypoint_used": { "lat": 10.7885, "lng": 106.7020 },
+    "detour_waypoints_used": [
+      { "lat": 10.7885, "lng": 106.7020 }
+    ],
+    "baseline_route_coordinates": [
+      { "lat": 10.7769, "lng": 106.7009 },
+      { "lat": 10.7992, "lng": 106.7185 }
+    ],
     "distance_meters": 4850,
     "duration_seconds": 780,
     "encoded_polyline": "}_ilA...",
@@ -201,20 +212,25 @@ Lấy dữ liệu tổng hợp tần suất ngập phục vụ lớp bản đồ
 
 ### 3.6. `GET /api/cameras`
 Lấy danh sách các điểm camera giao thông đang theo dõi (kèm tọa độ GPS và tên tuyến đường).
+- **Các trường mở rộng trong `CameraItem`:**
+  - `local_image_path`: `str | None` — Đường dẫn tương đối hoặc tuyệt đối tới file ảnh tĩnh mẫu trên đĩa (ví dụ: `"data/sample_frames/level_2_moderate.jpg"`) dùng cho kiểm thử offline hoặc stage demo.
+  - `default_severity_hint`: `int | None` — Mức độ ngập mặc định (`0..3`) dùng làm gợi ý khi kích hoạt mock polling nếu client không chỉ định rõ.
 - **Response `200 OK`:**
   ```json
   {
-    "count": 2,
+    "count": 7,
     "items": [
       {
-        "camera_id": "cam_hcm_001",
-        "name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
-        "city": "TP.HCM",
+        "camera_id": "cam_dn_001",
+        "name": "Ngã tư Hàm Nghi - Nguyễn Văn Linh",
+        "city": "Đà Nẵng",
         "source": "public_traffic_camera",
         "feed_url": "https://camera.0511.vn",
-        "lat": 10.7858,
-        "lng": 106.7082,
-        "road_segment_id": "seg_hcm_nhc_01"
+        "lat": 16.0604,
+        "lng": 108.2104,
+        "road_segment_id": "seg_dn_hnnvl_01",
+        "local_image_path": "data/sample_frames/level_2_moderate.jpg",
+        "default_severity_hint": 2
       }
     ]
   }
@@ -222,11 +238,15 @@ Lấy danh sách các điểm camera giao thông đang theo dõi (kèm tọa đ�
 
 ### 3.7. `POST /api/cameras/poll`
 Kích hoạt kiểm tra snapshot/frame mới nhất từ danh sách camera (hoặc một tập `camera_ids` chỉ định), đưa qua `ai-vision` phân tích và đồng bộ vào Firestore nếu phát hiện ngập (`severity_level >= 1`).
+- **Các trường mở rộng:**
+  - Request: `force_refresh: bool = False` — Nếu `true`, ép phân tích lại AI bỏ qua bộ đệm sai khác frame delta (frame-delta hash deduplication).
+  - Response item (`CameraPollResultItem`): `frame_delta_skipped: bool = False` — Đánh dấu frame không thay đổi so với lần poll trước (`delta < 0.04`) nên đã bỏ qua gọi AI để tiết kiệm quota.
 - **Request (`application/json`, tùy chọn body rỗng):**
   ```json
   {
-    "camera_ids": ["cam_hcm_001"],
-    "mock_severity_hint": 2
+    "camera_ids": ["cam_dn_001"],
+    "mock_severity_hint": 2,
+    "force_refresh": false
   }
   ```
 - **Response `200 OK`:**
@@ -236,20 +256,63 @@ Kích hoạt kiểm tra snapshot/frame mới nhất từ danh sách camera (ho�
     "flooded_count": 1,
     "results": [
       {
-        "camera_id": "cam_hcm_001",
-        "frame_source": "mock_fallback",
+        "camera_id": "cam_dn_001",
+        "frame_source": "local_image",
         "analysis": {
           "flood_detected": true,
           "severity_level": 2,
           "visual_cue": "Nước ngập quá mép lề đường và chạm khoảng nửa bánh xe máy",
           "estimated_depth_cm": "20-35",
           "passable_for_motorbike": false,
-          "confidence": 0.91,
-          "vision_model": "gemini-3.8-flash",
-          "analyzed_at": "2026-11-11T10:30:00+00:00"
+          "confidence": 0.92,
+          "vision_model": "gemini-3.8-flash (mock-fallback)",
+          "analyzed_at": "2026-11-14T01:30:00+00:00"
         },
-        "broadcasted_to_firestore": false
+        "broadcasted_to_firestore": false,
+        "frame_delta_skipped": false
       }
     ]
+  }
+  ```
+
+### 3.8. Các Endpoint Điều Khiển Kịch Bản Demo Sân Khấu (Demo Scenario Control)
+
+#### `POST /api/flood-zones/reset`
+Khôi phục danh sách các vùng ngập về trạng thái mẫu ban đầu từ file `data/flood_events.sample.geojson` và xóa sạch bộ đệm frame camera trong bộ nhớ (`_LAST_CAMERA_FRAMES`). Phục vụ việc reset demo nhiều lần trên sân khấu mà không cần khởi động lại backend.
+- **Request (`application/json`):** Body rỗng `{}`
+- **Response `200 OK`:** Trả về `FloodZonesListResponse`
+  ```json
+  {
+    "count": 4,
+    "items": [
+      {
+        "event_id": "evt_001",
+        "source": "camera_ai",
+        "camera_id": "cam_hcm_001",
+        "location_name": "Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+        "lat": 10.7858,
+        "lng": 106.7082,
+        "radius_meters": 120,
+        "severity_level": 2,
+        "visual_cue": "Nước ngập quá mép lề đường và chạm nửa bánh xe máy",
+        "estimated_depth_cm": "20-35",
+        "passable_for_motorbike": false,
+        "confidence": 0.91,
+        "vision_model": "gemini-3.8-flash",
+        "status": "active",
+        "updated_at": "2026-11-11T10:00:00+07:00"
+      }
+    ]
+  }
+  ```
+
+#### `DELETE /api/flood-zones/{event_id}`
+Xóa hoặc giải tỏa một vùng ngập đang kích hoạt (cả trong bộ nhớ và Firestore), phục vụ kịch bản demo: khi nước rút hoặc đội cứu hộ xử lý xong điểm ngập, đường sẽ thông trở lại và hệ thống hủy reroute.
+- **Path Parameter:** `event_id: str` (ví dụ: `evt_dn_001`)
+- **Response `200 OK`:**
+  ```json
+  {
+    "deleted": true,
+    "event_id": "evt_dn_001"
   }
   ```

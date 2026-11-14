@@ -61,6 +61,8 @@ class RouteResponse(BaseModel):
     rerouted: bool
     avoided_flood_zone_ids: list[str]
     detour_waypoint_used: LatLng | None = None
+    detour_waypoints_used: list[LatLng] = Field(default_factory=list)
+    baseline_route_coordinates: list[LatLng] = Field(default_factory=list)
     distance_meters: int
     duration_seconds: int
     encoded_polyline: str
@@ -77,6 +79,8 @@ class CameraItem(BaseModel):
     lat: float
     lng: float
     road_segment_id: str | None = None
+    local_image_path: str | None = None
+    default_severity_hint: int | None = Field(default=None, ge=0, le=3)
 
 
 class CameraListResponse(BaseModel):
@@ -87,6 +91,7 @@ class CameraListResponse(BaseModel):
 class CameraPollRequest(BaseModel):
     camera_ids: list[str] | None = None
     mock_severity_hint: int = Field(default=2, ge=0, le=3)
+    force_refresh: bool = False
 
 
 class CameraPollResultItem(BaseModel):
@@ -94,6 +99,7 @@ class CameraPollResultItem(BaseModel):
     frame_source: str
     analysis: dict[str, Any]
     broadcasted_to_firestore: bool
+    frame_delta_skipped: bool = False
 
 
 class CameraPollResponse(BaseModel):

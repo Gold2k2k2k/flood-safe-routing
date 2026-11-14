@@ -147,6 +147,7 @@ def build_routes_api_v2_payload(
     destination: LatLng,
     travel_mode: str = "TWO_WHEELER",
     via_waypoint: LatLng | None = None,
+    via_waypoints: list[LatLng] | None = None,
 ) -> dict[str, Any]:
     """
     Build a compliant Google Routes API v2 computeRoutes payload.
@@ -165,17 +166,24 @@ def build_routes_api_v2_payload(
         "polylineQuality": "HIGH_QUALITY",
         "polylineEncoding": "ENCODED_POLYLINE",
     }
-    if via_waypoint is not None:
+    wps: list[LatLng] = []
+    if via_waypoints:
+        wps.extend(via_waypoints)
+    elif via_waypoint is not None:
+        wps.append(via_waypoint)
+
+    if wps:
         body["intermediates"] = [
             {
                 "location": {
                     "latLng": {
-                        "latitude": via_waypoint.lat,
-                        "longitude": via_waypoint.lng,
+                        "latitude": wp.lat,
+                        "longitude": wp.lng,
                     }
                 },
                 "via": True,
             }
+            for wp in wps
         ]
     else:
         body["computeAlternativeRoutes"] = True
@@ -196,6 +204,7 @@ async def _call_routes_api_v2(
     destination: LatLng,
     travel_mode: str = "TWO_WHEELER",
     via_waypoint: LatLng | None = None,
+    via_waypoints: list[LatLng] | None = None,
 ) -> list[dict[str, Any]]:
     headers = {
         "Content-Type": "application/json",
@@ -207,12 +216,100 @@ async def _call_routes_api_v2(
         destination=destination,
         travel_mode=travel_mode,
         via_waypoint=via_waypoint,
+        via_waypoints=via_waypoints,
     )
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(ROUTES_API_V2_URL, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
     return data.get("routes", [])
+
+
+def compute_multi_zone_detour_waypoints(
+    origin: LatLng,
+    destination: LatLng,
+    hit_zones: list[FloodZoneItem],
+    all_active_zones: list[FloodZoneItem],
+) -> list[LatLng]:
+    """
+    Iteratively compute perpendicular left/right detour waypoints outside all dangerous flood zones
+    (severity >= 2) across multiple intersected zones along the travel direction.
+    """
+    if not hit_zones:
+        return []
+
+    sorted_zones = sorted(
+        hit_zones,
+        key=lambda z: haversine_meters(origin, LatLng(lat=z.lat, lng=z.lng)),
+    )
+
+    detour_wps: list[LatLng] = []
+
+    for zone in sorted_zones:
+        # Check if current path already avoids this zone
+        curr_path = [origin] + detour_wps + [destination]
+        if not find_intersecting_flood_zones(curr_path, [zone]):
+            continue
+
+        prev_pt = detour_wps[-1] if detour_wps else origin
+        offset_normal = max(350.0, zone.radius_meters + 220.0)
+        offset_wide = max(550.0, zone.radius_meters + 400.0)
+
+        cands_primary = compute_detour_candidates(
+            origin, destination, zone, offset_meters=offset_normal
+        ) + compute_detour_candidates(
+            origin, destination, zone, offset_meters=offset_wide
+        )
+
+        cands_local: list[LatLng] = []
+        if prev_pt != origin:
+            cands_local = compute_detour_candidates(
+                prev_pt, destination, zone, offset_meters=offset_normal
+            ) + compute_detour_candidates(
+                prev_pt, destination, zone, offset_meters=offset_wide
+            )
+
+        all_cands: list[LatLng] = []
+        seen: set[tuple[float, float]] = set()
+        for c in cands_primary + cands_local:
+            key = (round(c.lat, 6), round(c.lng, 6))
+            if key not in seen:
+                seen.add(key)
+                all_cands.append(c)
+
+        best_cand: LatLng | None = None
+        best_score: tuple[int, int, float] = (999, 999, float("inf"))
+
+        for cand in all_cands:
+            test_wps = detour_wps + [cand]
+            test_path = [origin] + test_wps + [destination]
+
+            # Zone being resolved must not be intersected
+            if find_intersecting_flood_zones([prev_pt, cand, destination], [zone]):
+                continue
+
+            # Incoming leg [prev_pt, cand] must not intersect any dangerous flood zone
+            hits_incoming = len(find_intersecting_flood_zones([prev_pt, cand], all_active_zones))
+
+            # Total intersections on the test path with all dangerous zones
+            hits_total = len(find_intersecting_flood_zones(test_path, all_active_zones))
+
+            total_dist = sum(
+                haversine_meters(test_path[i], test_path[i + 1])
+                for i in range(len(test_path) - 1)
+            )
+
+            score = (hits_incoming, hits_total, total_dist)
+            if score < best_score:
+                best_score = score
+                best_cand = cand
+
+        if best_cand is not None:
+            detour_wps.append(best_cand)
+        elif all_cands:
+            detour_wps.append(all_cands[0])
+
+    return detour_wps
 
 
 async def compute_safe_route(
@@ -238,33 +335,37 @@ async def compute_safe_route(
                     )
                     for r in routes
                 ]
+                r0, coords0 = decoded_routes[0]
+                baseline_coords = coords0 or [req.origin, req.destination]
 
                 if not req.avoid_flood_zones:
-                    r0, coords0 = decoded_routes[0]
                     return RouteResponse(
                         rerouted=False,
                         avoided_flood_zone_ids=[],
                         detour_waypoint_used=None,
+                        detour_waypoints_used=[],
+                        baseline_route_coordinates=baseline_coords,
                         distance_meters=int(r0.get("distanceMeters", 0)),
                         duration_seconds=_parse_duration_seconds(r0.get("duration")),
                         encoded_polyline=r0.get("polyline", {}).get("encodedPolyline", ""),
-                        route_coordinates=coords0 or [req.origin, req.destination],
+                        route_coordinates=baseline_coords,
                         warning_message=None,
                     )
 
                 primary_hits = find_intersecting_flood_zones(
-                    decoded_routes[0][1], active_zones
+                    baseline_coords, active_zones
                 )
                 if not primary_hits:
-                    r0, coords0 = decoded_routes[0]
                     return RouteResponse(
                         rerouted=False,
                         avoided_flood_zone_ids=[],
                         detour_waypoint_used=None,
+                        detour_waypoints_used=[],
+                        baseline_route_coordinates=baseline_coords,
                         distance_meters=int(r0.get("distanceMeters", 0)),
                         duration_seconds=_parse_duration_seconds(r0.get("duration")),
                         encoded_polyline=r0.get("polyline", {}).get("encodedPolyline", ""),
-                        route_coordinates=coords0,
+                        route_coordinates=baseline_coords,
                         warning_message=None,
                     )
 
@@ -275,6 +376,8 @@ async def compute_safe_route(
                             rerouted=True,
                             avoided_flood_zone_ids=[z.event_id for z in primary_hits],
                             detour_waypoint_used=None,
+                            detour_waypoints_used=[],
+                            baseline_route_coordinates=baseline_coords,
                             distance_meters=int(r_alt.get("distanceMeters", 0)),
                             duration_seconds=_parse_duration_seconds(r_alt.get("duration")),
                             encoded_polyline=r_alt.get("polyline", {}).get(
@@ -286,7 +389,44 @@ async def compute_safe_route(
                             ),
                         )
 
-                # Layer 2: Try left & right perpendicular `via` detour waypoints
+                # Layer 2: Try multi-zone perpendicular detour waypoints
+                multi_detour_wps = compute_multi_zone_detour_waypoints(
+                    req.origin, req.destination, primary_hits, active_zones
+                )
+                if multi_detour_wps:
+                    detour_routes = await _call_routes_api_v2(
+                        req.origin,
+                        req.destination,
+                        travel_mode=req.travel_mode,
+                        via_waypoints=multi_detour_wps,
+                    )
+                    if detour_routes:
+                        r_det = detour_routes[0]
+                        coords_det = decode_encoded_polyline(
+                            r_det.get("polyline", {}).get("encodedPolyline", "")
+                        )
+                        if not find_intersecting_flood_zones(coords_det, active_zones):
+                            target_name = (
+                                primary_hits[0].location_name or primary_hits[0].event_id
+                            )
+                            return RouteResponse(
+                                rerouted=True,
+                                avoided_flood_zone_ids=[z.event_id for z in primary_hits],
+                                detour_waypoint_used=multi_detour_wps[0],
+                                detour_waypoints_used=multi_detour_wps,
+                                baseline_route_coordinates=baseline_coords,
+                                distance_meters=int(r_det.get("distanceMeters", 0)),
+                                duration_seconds=_parse_duration_seconds(r_det.get("duration")),
+                                encoded_polyline=r_det.get("polyline", {}).get(
+                                    "encodedPolyline", ""
+                                ),
+                                route_coordinates=coords_det,
+                                warning_message=(
+                                    f"Đã tự động bẻ hướng né {len(primary_hits)} điểm ngập ({target_name})."
+                                ),
+                            )
+
+                # Fallback evaluation of single candidates for primary zone if multi-zone route had intersections
                 target_zone = primary_hits[0]
                 offset_m = max(300.0, target_zone.radius_meters + 220.0)
                 candidates = compute_detour_candidates(
@@ -319,6 +459,8 @@ async def compute_safe_route(
                         rerouted=True,
                         avoided_flood_zone_ids=[z.event_id for z in primary_hits],
                         detour_waypoint_used=wp_best,
+                        detour_waypoints_used=[wp_best],
+                        baseline_route_coordinates=baseline_coords,
                         distance_meters=int(r_best.get("distanceMeters", 0)),
                         duration_seconds=_parse_duration_seconds(r_best.get("duration")),
                         encoded_polyline=r_best.get("polyline", {}).get(
@@ -340,28 +482,19 @@ async def compute_safe_route(
 
     # Deterministic geometry fallback (USE_MOCK_FALLBACK=true)
     direct_coords = [req.origin, req.destination]
+    baseline_coords = list(direct_coords)
     hit_zones = (
         find_intersecting_flood_zones(direct_coords, active_zones)
         if req.avoid_flood_zones
         else []
     )
 
-    detour_wp: LatLng | None = None
+    detour_wps: list[LatLng] = []
     if hit_zones:
-        candidates = compute_detour_candidates(
-            req.origin,
-            req.destination,
-            hit_zones[0],
-            offset_meters=max(350.0, hit_zones[0].radius_meters + 220.0),
+        detour_wps = compute_multi_zone_detour_waypoints(
+            req.origin, req.destination, hit_zones, active_zones
         )
-        chosen = candidates[0]
-        for cand in candidates:
-            cand_path = [req.origin, cand, req.destination]
-            if not find_intersecting_flood_zones(cand_path, active_zones):
-                chosen = cand
-                break
-        detour_wp = chosen
-        route_coords = [req.origin, detour_wp, req.destination]
+        route_coords = [req.origin] + detour_wps + [req.destination]
     else:
         route_coords = direct_coords
 
@@ -380,7 +513,9 @@ async def compute_safe_route(
     return RouteResponse(
         rerouted=bool(hit_zones),
         avoided_flood_zone_ids=[z.event_id for z in hit_zones],
-        detour_waypoint_used=detour_wp,
+        detour_waypoint_used=detour_wps[0] if detour_wps else None,
+        detour_waypoints_used=detour_wps,
+        baseline_route_coordinates=baseline_coords,
         distance_meters=dist_int,
         duration_seconds=dur_int,
         encoded_polyline="",

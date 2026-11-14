@@ -16,13 +16,29 @@ from .schemas import FloodAnalysisLLMOutput, FloodAnalysisResult
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Bạn là hệ thống AI chuyên phân tích hình ảnh giao thông đô thị tại Việt Nam (TP.HCM, Hà Nội, Đà Nẵng).
-Hãy quan sát bức ảnh đường phố và xác định mức độ ngập nước dựa trên các vật chuẩn thực tế:
-- Mức 0 (SAFE): Mặt đường khô hoặc chỉ ướt mặt nhựa. Lưu ý: mặt đường ướt phản chiếu ánh đèn xe/đèn đường/bầu trời nhưng không có vũng nước đọng liên tục che khuất vạch kẻ đường hay dâng lên mép vỉa hè vẫn là Mức 0.
-- Mức 1 (MINOR): Nước mới đọng sát mép vỉa hè / lề đường (< 15 cm), chưa ngập vành bánh xe máy -> passable_for_motorbike = true.
-- Mức 2 (MODERATE): Nước ngập qua lề đường, chạm từ 1/3 đến nửa bánh xe máy (15-35 cm), tạo sóng nước quanh bánh xe và nguy cơ chết máy cao -> passable_for_motorbike = false.
-- Mức 3 (SEVERE): Nước ngập lút quá nửa bánh xe, chạm ống xả/lốc máy/yên xe (> 35 cm) hoặc có người phải dắt bộ -> passable_for_motorbike = false.
-Trả về đúng định dạng JSON theo schema."""
+SYSTEM_PROMPT = """Bạn là hệ thống AI chuyên gia phân tích thị giác hình ảnh giao thông đô thị tại Việt Nam (Đà Nẵng, TP.HCM, Hà Nội).
+Nhiệm vụ của bạn là quan sát ảnh camera giao thông hoặc ảnh người dân gửi về và phân loại chính xác mức độ ngập lụt dựa trên các vật chuẩn thực địa đô thị Việt Nam:
+
+1. Thước đo vật chuẩn đô thị Việt Nam:
+- Mép vỉa hè / bó vỉa tiêu chuẩn: cao khoảng 12 - 15 cm so với mặt đường.
+- Bánh xe máy tiêu chuẩn (vành 14 - 17 inch): bán kính trục bánh khoảng 25 - 30 cm, toàn bộ đường kính khoảng 55 - 60 cm.
+- Ống xả (pô xe) và lốc máy xe máy phổ thông (Wave, Sirius, Vision, Air Blade): cao khoảng 30 - 35 cm so với mặt đường.
+
+2. Quy tắc phân loại mức độ ngập (severity_level):
+- Mức 0 (SAFE) [depth = "0", passable_for_motorbike = true]:
+  Mặt đường khô ráo hoặc chỉ ướt mặt nhựa đường sau mưa.
+  QUAN TRỌNG - Phân biệt phản xạ mặt đường ướt (specular reflection): Mặt đường nhựa ướt có thể phản chiếu ánh đèn xe, đèn đường hoặc bầu trời nhưng KHÔNG có lớp nước đục tù đọng, vạch kẻ sơn đường vẫn nhìn rõ, mép vỉa hè khô ráo hoàn toàn -> Bắt buộc phân loại Mức 0 (SAFE).
+- Mức 1 (MINOR) [depth = "5-15", passable_for_motorbike = true]:
+  Nước mưa bắt đầu đọng thành vũng sát mép bó vỉa lề đường (< 15 cm, chưa tràn qua vỉa hè). Nước chưa ngập đến vành kim loại bánh xe máy. Xe máy di chuyển an toàn qua làn giữa đường.
+- Mức 2 (MODERATE) [depth = "20-35", passable_for_motorbike = false]:
+  Vỉa hè bị ngập (nước dâng > 15 cm). Nước đục dâng ngập từ 1/3 đến nửa bánh xe máy (khoảng 20 - 35 cm), che khuất hoàn toàn vạch kẻ đường, tạo sóng nước khi xe chạy qua. Nguy cơ nước tràn vào lọc gió hoặc chết máy rất cao -> Không an toàn cho xe máy.
+- Mức 3 (SEVERE) [depth = ">35", passable_for_motorbike = false]:
+  Ngập lụt nghiêm trọng (> 35 cm). Nước ngập lút quá nửa bánh xe máy, chạm hoặc vượt quá ống xả, lốc máy, sàn để chân hoặc yên xe. Xuất hiện cảnh người dân dắt bộ xe chết máy hoặc phương tiện bị bỏ lại giữa dòng nước sâu -> Tuyệt đối cấm xe máy qua lại.
+
+3. Quy tắc phát hiện ảnh rác / không phải đường phố (Anti-spam & Non-street guardrail):
+- Nếu bức ảnh không chụp khung cảnh đường sá/giao thông (ví dụ: ảnh selfie, trong nhà, tài liệu, phong cảnh không có mặt đường) hoặc ảnh bị mờ nhòe nghiêm trọng do hạt mưa bám kính, tối đen hoàn toàn không quan sát được: Đặt confidence < 0.5, flood_detected = false, severity_level = 0, visual_cue mô tả ảnh không rõ hoặc không phải đường phố.
+
+Trả về đúng định dạng JSON theo schema đã chỉ định."""
 
 
 def _is_real_key(val: str | None) -> bool:

@@ -1,5 +1,55 @@
 [
   {
+    "zone_id": "dn_thanh_khe_hnnvl",
+    "city": "Đà Nẵng",
+    "district": "Thanh Khê",
+    "lat": 16.0604,
+    "lng": 108.2104,
+    "flood_frequency_30d": 14,
+    "avg_severity": 2.2,
+    "peak_trigger": "heavy_rain_and_tide"
+  },
+  {
+    "zone_id": "dn_hai_chau_ldoik",
+    "city": "Đà Nẵng",
+    "district": "Hải Châu",
+    "lat": 16.0680,
+    "lng": 108.2148,
+    "flood_frequency_30d": 18,
+    "avg_severity": 2.7,
+    "peak_trigger": "heavy_rain"
+  },
+  {
+    "zone_id": "dn_thanh_khe_hpdbp",
+    "city": "Đà Nẵng",
+    "district": "Thanh Khê",
+    "lat": 16.0662,
+    "lng": 108.2025,
+    "flood_frequency_30d": 9,
+    "avg_severity": 1.8,
+    "peak_trigger": "heavy_rain"
+  },
+  {
+    "zone_id": "dn_hai_chau_nt",
+    "city": "Đà Nẵng",
+    "district": "Hải Châu",
+    "lat": 16.0435,
+    "lng": 108.2215,
+    "flood_frequency_30d": 11,
+    "avg_severity": 1.6,
+    "peak_trigger": "poor_drainage"
+  },
+  {
+    "zone_id": "dn_lien_chieu_ms",
+    "city": "Đà Nẵng",
+    "district": "Liên Chiểu",
+    "lat": 16.0540,
+    "lng": 108.1585,
+    "flood_frequency_30d": 22,
+    "avg_severity": 2.5,
+    "peak_trigger": "runoff_and_flash_flood"
+  },
+  {
     "zone_id": "hcm_binh_thanh_nhc",
     "city": "TP.HCM",
     "district": "Bình Thạnh",
