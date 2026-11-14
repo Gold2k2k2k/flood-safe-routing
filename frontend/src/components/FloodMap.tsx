@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AdvancedMarker,
   APIProvider,
@@ -23,6 +23,7 @@ import type {
 } from "../types/flood";
 
 export type MapClickMode = "origin" | "destination" | null;
+type TileStyle = "voyager" | "dark";
 
 interface FloodMapProps {
   origin: LatLng;
@@ -46,14 +47,26 @@ interface FloodMapProps {
 function MapCameraController({
   origin,
   destination,
-  routeResult
+  routeResult,
+  onTilesReady
 }: {
   origin: LatLng;
   destination: LatLng;
   routeResult: RouteResponse | null;
+  onTilesReady: () => void;
 }) {
   const map = useMap();
   const coreLib = useMapsLibrary("core");
+
+  useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener("tilesloaded", () => {
+      onTilesReady();
+    });
+    return () => {
+      listener.remove();
+    };
+  }, [map, onTilesReady]);
 
   useEffect(() => {
     if (!map || !coreLib) return;
@@ -159,85 +172,74 @@ function RoutePolylineLayer({ routeResult }: { routeResult: RouteResponse | null
   return null;
 }
 
-const SVG_WIDTH = 960;
-const SVG_HEIGHT = 640;
+const VIEW_WIDTH = 960;
+const VIEW_HEIGHT = 640;
+const TILE_SIZE = 256;
 
-interface BoundsBox {
-  minLat: number;
-  maxLat: number;
-  minLng: number;
-  maxLng: number;
+function latLngToWorldPx(lat: number, lng: number, zoom: number) {
+  const scale = TILE_SIZE * Math.pow(2, zoom);
+  const x = ((lng + 180) / 360) * scale;
+  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+  return { x, y };
 }
 
-function computeLocalBounds(
+function worldPxToLatLng(worldX: number, worldY: number, zoom: number): LatLng {
+  const scale = TILE_SIZE * Math.pow(2, zoom);
+  const lng = (worldX / scale) * 360 - 180;
+  const n = Math.PI - (2 * Math.PI * worldY) / scale;
+  const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  return { lat, lng };
+}
+
+function computeFittedViewport(
   origin: LatLng,
   destination: LatLng,
-  routeResult: RouteResponse | null,
-  zones: FloodZoneItem[],
-  cameras: CameraItem[],
-  zoomMultiplier: number
-): BoundsBox {
-  const focusPoints: LatLng[] = [origin, destination];
+  routeResult: RouteResponse | null
+): { center: LatLng; zoom: number } {
+  const points: LatLng[] = [origin, destination];
   if (routeResult) {
-    focusPoints.push(...routeResult.route_coordinates);
+    points.push(...routeResult.route_coordinates);
     if (routeResult.baseline_route_coordinates) {
-      focusPoints.push(...routeResult.baseline_route_coordinates);
+      points.push(...routeResult.baseline_route_coordinates);
     }
     if (routeResult.detour_waypoints_used) {
-      focusPoints.push(...routeResult.detour_waypoints_used);
+      points.push(...routeResult.detour_waypoints_used);
     }
   }
 
-  const centerLat = focusPoints.reduce((acc, p) => acc + p.lat, 0) / focusPoints.length;
-  const centerLng = focusPoints.reduce((acc, p) => acc + p.lng, 0) / focusPoints.length;
+  const minLat = Math.min(...points.map((p) => p.lat));
+  const maxLat = Math.max(...points.map((p) => p.lat));
+  const minLng = Math.min(...points.map((p) => p.lng));
+  const maxLng = Math.max(...points.map((p) => p.lng));
 
-  // Include zones & cameras in the same city cluster (~0.18 deg) so Vietnam-wide points don't flatten local street zoom
-  const localClusterMarginDeg = 0.18;
-  zones.forEach((z) => {
-    if (
-      Math.abs(z.lat - centerLat) <= localClusterMarginDeg &&
-      Math.abs(z.lng - centerLng) <= localClusterMarginDeg
-    ) {
-      focusPoints.push({ lat: z.lat, lng: z.lng });
-    }
-  });
-  cameras.forEach((c) => {
-    if (
-      Math.abs(c.lat - centerLat) <= localClusterMarginDeg &&
-      Math.abs(c.lng - centerLng) <= localClusterMarginDeg
-    ) {
-      focusPoints.push({ lat: c.lat, lng: c.lng });
-    }
-  });
-
-  let minLat = Math.min(...focusPoints.map((p) => p.lat));
-  let maxLat = Math.max(...focusPoints.map((p) => p.lat));
-  let minLng = Math.min(...focusPoints.map((p) => p.lng));
-  let maxLng = Math.max(...focusPoints.map((p) => p.lng));
-
-  const spanLat = Math.max(0.014, maxLat - minLat);
-  const spanLng = Math.max(0.018, maxLng - minLng);
-
-  // Maintain SVG aspect ratio cleanly without squashing map angles
-  const cosLat = Math.max(0.4, Math.cos((centerLat * Math.PI) / 180));
-  const paddedLatHalf = (spanLat * 0.72) * zoomMultiplier;
-  const targetRatio = SVG_WIDTH / SVG_HEIGHT;
-  const minLngHalfFromRatio = (paddedLatHalf * targetRatio) / cosLat;
-  const paddedLngHalf = Math.max((spanLng * 0.72) * zoomMultiplier, minLngHalfFromRatio);
-  const finalLatHalf = Math.max(paddedLatHalf, (paddedLngHalf * cosLat) / targetRatio);
-
-  const midLat = (minLat + maxLat) / 2;
-  const midLng = (minLng + maxLng) / 2;
-
-  return {
-    minLat: midLat - finalLatHalf,
-    maxLat: midLat + finalLatHalf,
-    minLng: midLng - paddedLngHalf,
-    maxLng: midLng + paddedLngHalf
+  const center = {
+    lat: (minLat + maxLat) / 2,
+    lng: (minLng + maxLng) / 2
   };
+
+  for (let z = 16; z >= 11; z--) {
+    const nw = latLngToWorldPx(maxLat, minLng, z);
+    const se = latLngToWorldPx(minLat, maxLng, z);
+    const spanW = Math.abs(se.x - nw.x);
+    const spanH = Math.abs(se.y - nw.y);
+    if (spanW <= VIEW_WIDTH * 0.68 && spanH <= VIEW_HEIGHT * 0.68) {
+      return { center, zoom: z };
+    }
+  }
+
+  return { center, zoom: 13 };
 }
 
-function SvgVectorFallbackMap({
+function tileUrl(style: TileStyle, zoom: number, x: number, y: number): string {
+  if (style === "dark") {
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${zoom}/${y}/${x}`;
+  }
+  return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+}
+
+function InteractiveOsmFallbackMap({
   origin,
   destination,
   clickMode,
@@ -248,7 +250,9 @@ function SvgVectorFallbackMap({
   heatmapPoints,
   showHeatmap,
   onSelectEntity,
-  pollResultsByCamera
+  pollResultsByCamera,
+  fallbackReason,
+  onRetryGoogleMaps
 }: Pick<
   FloodMapProps,
   | "origin"
@@ -262,37 +266,129 @@ function SvgVectorFallbackMap({
   | "showHeatmap"
   | "onSelectEntity"
   | "pollResultsByCamera"
->) {
-  const [zoomMultiplier, setZoomMultiplier] = useState(1);
-
-  const bounds = useMemo(
-    () => computeLocalBounds(origin, destination, routeResult, zones, cameras, zoomMultiplier),
-    [origin, destination, routeResult, zones, cameras, zoomMultiplier]
+> & {
+  fallbackReason?: string | null;
+  onRetryGoogleMaps?: () => void;
+}) {
+  const fitted = useMemo(
+    () => computeFittedViewport(origin, destination, routeResult),
+    [origin, destination, routeResult]
   );
 
+  const [center, setCenter] = useState<LatLng>(fitted.center);
+  const [zoom, setZoom] = useState<number>(fitted.zoom);
+  const [tileStyle, setTileStyle] = useState<TileStyle>("voyager");
+  const dragStateRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    startWorldCenterX: number;
+    startWorldCenterY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressNextClickRef = useRef(false);
+
+  useEffect(() => {
+    setCenter(fitted.center);
+    setZoom(fitted.zoom);
+  }, [fitted.center.lat, fitted.center.lng, fitted.zoom]);
+
+  const centerWorld = useMemo(
+    () => latLngToWorldPx(center.lat, center.lng, zoom),
+    [center.lat, center.lng, zoom]
+  );
+  const topLeftWorldX = centerWorld.x - VIEW_WIDTH / 2;
+  const topLeftWorldY = centerWorld.y - VIEW_HEIGHT / 2;
+
   const toXY = (pt: LatLng) => {
-    const x = ((pt.lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * SVG_WIDTH;
-    const y = ((bounds.maxLat - pt.lat) / (bounds.maxLat - bounds.minLat)) * SVG_HEIGHT;
-    return { x, y };
+    const w = latLngToWorldPx(pt.lat, pt.lng, zoom);
+    return {
+      x: w.x - topLeftWorldX,
+      y: w.y - topLeftWorldY
+    };
   };
 
-  const metersToSvgRadius = (meters: number) => {
-    const degLat = meters / 111320;
-    const px = (degLat / (bounds.maxLat - bounds.minLat)) * SVG_HEIGHT;
-    return Math.max(8, Math.min(90, px));
+  const metersToPx = (meters: number) => {
+    const metersPerPx =
+      (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / Math.pow(2, zoom);
+    return Math.max(10, Math.min(120, meters / metersPerPx));
+  };
+
+  const visibleTiles = useMemo(() => {
+    const maxIndex = Math.pow(2, zoom);
+    const minTx = Math.floor(topLeftWorldX / TILE_SIZE);
+    const maxTx = Math.floor((topLeftWorldX + VIEW_WIDTH) / TILE_SIZE);
+    const minTy = Math.floor(topLeftWorldY / TILE_SIZE);
+    const maxTy = Math.floor((topLeftWorldY + VIEW_HEIGHT) / TILE_SIZE);
+
+    const tiles: Array<{ key: string; href: string; x: number; y: number }> = [];
+    for (let ty = minTy; ty <= maxTy; ty++) {
+      if (ty < 0 || ty >= maxIndex) continue;
+      for (let tx = minTx; tx <= maxTx; tx++) {
+        const wrappedTx = ((tx % maxIndex) + maxIndex) % maxIndex;
+        tiles.push({
+          key: `${tileStyle}-${zoom}-${tx}-${ty}`,
+          href: tileUrl(tileStyle, zoom, wrappedTx, ty),
+          x: tx * TILE_SIZE - topLeftWorldX,
+          y: ty * TILE_SIZE - topLeftWorldY
+        });
+      }
+    }
+    return tiles;
+  }, [tileStyle, zoom, topLeftWorldX, topLeftWorldY]);
+
+  const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    const cw = latLngToWorldPx(center.lat, center.lng, zoom);
+    dragStateRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startWorldCenterX: cw.x,
+      startWorldCenterY: cw.y,
+      moved: false
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dxCss = e.clientX - drag.startClientX;
+    const dyCss = e.clientY - drag.startClientY;
+    if (Math.abs(dxCss) > 4 || Math.abs(dyCss) > 4) {
+      drag.moved = true;
+    }
+    if (!drag.moved) return;
+    const scaleX = VIEW_WIDTH / rect.width;
+    const scaleY = VIEW_HEIGHT / rect.height;
+    const nextCenter = worldPxToLatLng(
+      drag.startWorldCenterX - dxCss * scaleX,
+      drag.startWorldCenterY - dyCss * scaleY,
+      zoom
+    );
+    setCenter(nextCenter);
+  };
+
+  const handlePointerUp = () => {
+    if (dragStateRef.current?.moved) {
+      suppressNextClickRef.current = true;
+    }
+    dragStateRef.current = null;
   };
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
     if (!clickMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    const relX = (e.clientX - rect.left) / rect.width;
-    const relY = (e.clientY - rect.top) / rect.height;
-    const lng = bounds.minLng + relX * (bounds.maxLng - bounds.minLng);
-    const lat = bounds.maxLat - relY * (bounds.maxLat - bounds.minLat);
+    const svgX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH;
+    const svgY = ((e.clientY - rect.top) / rect.height) * VIEW_HEIGHT;
+    const picked = worldPxToLatLng(topLeftWorldX + svgX, topLeftWorldY + svgY, zoom);
     onSelectCoordinate(clickMode, {
-      lat: Number(lat.toFixed(6)),
-      lng: Number(lng.toFixed(6))
+      lat: Number(picked.lat.toFixed(6)),
+      lng: Number(picked.lng.toFixed(6))
     });
   };
 
@@ -312,9 +408,19 @@ function SvgVectorFallbackMap({
 
   const originXY = toXY(origin);
   const destXY = toXY(destination);
+  const isLightTiles = tileStyle === "voyager";
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "#0b1120", overflow: "hidden" }}>
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        background: isLightTiles ? "#e2e8f0" : "#0b1120",
+        overflow: "hidden",
+        userSelect: "none"
+      }}
+    >
       <div
         style={{
           position: "absolute",
@@ -326,11 +432,14 @@ function SvgVectorFallbackMap({
           borderRadius: "8px",
           padding: "0.45rem 0.7rem",
           fontSize: "0.75rem",
-          color: "#cbd5e1"
+          color: "#e2e8f0",
+          maxWidth: "460px"
         }}
       >
-        <strong>Interactive Vector Map</strong> (Fallback khi không có{" "}
-        <code>VITE_GOOGLE_MAPS_API_KEY</code>)
+        <strong>OpenStreetMap Street View</strong>{" "}
+        <span style={{ color: "#94a3b8" }}>
+          ({fallbackReason || "Dùng nền đường phố thực tế khi không có Google Maps JS key"})
+        </span>
       </div>
 
       <div
@@ -340,17 +449,50 @@ function SvgVectorFallbackMap({
           right: "0.85rem",
           zIndex: 10,
           display: "flex",
+          flexWrap: "wrap",
           gap: "0.35rem"
         }}
       >
+        {onRetryGoogleMaps && (
+          <button
+            type="button"
+            onClick={onRetryGoogleMaps}
+            style={{
+              padding: "0.35rem 0.6rem",
+              borderRadius: "6px",
+              border: "1px solid #3b82f6",
+              background: "rgba(15, 23, 42, 0.92)",
+              color: "#93c5fd",
+              cursor: "pointer",
+              fontSize: "0.75rem"
+            }}
+          >
+            Thử Google Maps
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => setZoomMultiplier((z) => Math.max(0.35, z * 0.78))}
+          onClick={() => setTileStyle((s) => (s === "voyager" ? "dark" : "voyager"))}
           style={{
             padding: "0.35rem 0.6rem",
             borderRadius: "6px",
             border: "1px solid #334155",
-            background: "#1e293b",
+            background: "rgba(15, 23, 42, 0.92)",
+            color: "#f8fafc",
+            cursor: "pointer",
+            fontSize: "0.75rem"
+          }}
+        >
+          {isLightTiles ? "🌙 Nền tối" : "☀️ Nền phố"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoom((z) => Math.min(18, z + 1))}
+          style={{
+            padding: "0.35rem 0.65rem",
+            borderRadius: "6px",
+            border: "1px solid #334155",
+            background: "rgba(15, 23, 42, 0.92)",
             color: "#f8fafc",
             cursor: "pointer"
           }}
@@ -360,12 +502,12 @@ function SvgVectorFallbackMap({
         </button>
         <button
           type="button"
-          onClick={() => setZoomMultiplier((z) => Math.min(2.8, z * 1.28))}
+          onClick={() => setZoom((z) => Math.max(10, z - 1))}
           style={{
-            padding: "0.35rem 0.6rem",
+            padding: "0.35rem 0.65rem",
             borderRadius: "6px",
             border: "1px solid #334155",
-            background: "#1e293b",
+            background: "rgba(15, 23, 42, 0.92)",
             color: "#f8fafc",
             cursor: "pointer"
           }}
@@ -375,12 +517,15 @@ function SvgVectorFallbackMap({
         </button>
         <button
           type="button"
-          onClick={() => setZoomMultiplier(1)}
+          onClick={() => {
+            setCenter(fitted.center);
+            setZoom(fitted.zoom);
+          }}
           style={{
             padding: "0.35rem 0.6rem",
             borderRadius: "6px",
             border: "1px solid #334155",
-            background: "#1e293b",
+            background: "rgba(15, 23, 42, 0.92)",
             color: "#f8fafc",
             cursor: "pointer",
             fontSize: "0.75rem"
@@ -391,48 +536,63 @@ function SvgVectorFallbackMap({
       </div>
 
       <svg
-        viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+        viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         preserveAspectRatio="xMidYMid slice"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
         onClick={handleSvgClick}
         style={{
           width: "100%",
           height: "100%",
           display: "block",
-          cursor: clickMode ? "crosshair" : "default"
+          touchAction: "none",
+          cursor: clickMode ? "crosshair" : "grab"
         }}
       >
         <defs>
           <radialGradient id="heatBlob" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(239, 68, 68, 0.65)" />
-            <stop offset="55%" stopColor="rgba(249, 115, 22, 0.35)" />
+            <stop offset="0%" stopColor="rgba(239, 68, 68, 0.7)" />
+            <stop offset="55%" stopColor="rgba(249, 115, 22, 0.4)" />
             <stop offset="100%" stopColor="rgba(249, 115, 22, 0)" />
           </radialGradient>
         </defs>
 
-        {/* Background grid resembling urban blocks */}
-        <rect x={0} y={0} width={SVG_WIDTH} height={SVG_HEIGHT} fill="#0b1120" />
-        {Array.from({ length: 16 }).map((_, idx) => {
-          const x = (SVG_WIDTH / 16) * idx;
-          return <line key={`vx-${idx}`} x1={x} y1={0} x2={x} y2={SVG_HEIGHT} stroke="#162033" strokeWidth={1} />;
-        })}
-        {Array.from({ length: 10 }).map((_, idx) => {
-          const y = (SVG_HEIGHT / 10) * idx;
-          return <line key={`hy-${idx}`} x1={0} y1={y} x2={SVG_WIDTH} y2={y} stroke="#162033" strokeWidth={1} />;
-        })}
+        {/* Base fallback canvas + real Carto/OSM Slippy Street Tiles */}
+        <rect
+          x={0}
+          y={0}
+          width={VIEW_WIDTH}
+          height={VIEW_HEIGHT}
+          fill={isLightTiles ? "#cbd5e1" : "#0b1120"}
+        />
+        {visibleTiles.map((tile) => (
+          <image
+            key={tile.key}
+            href={tile.href}
+            x={tile.x}
+            y={tile.y}
+            width={TILE_SIZE}
+            height={TILE_SIZE}
+            preserveAspectRatio="none"
+          />
+        ))}
 
         {/* Historical Flood Heatmap Layer */}
         {showHeatmap &&
           heatmapPoints.map((pt, i) => {
             const { x, y } = toXY(pt);
-            const r = 34 + pt.weight * 32;
+            const r = 30 + pt.weight * 28;
             return <circle key={`heat-${i}`} cx={x} cy={y} r={r} fill="url(#heatBlob)" />;
           })}
 
         {/* Flood Zones */}
         {zones.map((z) => {
           const { x, y } = toXY(z);
-          const r = metersToSvgRadius(z.radius_meters);
-          const color = z.severity_level >= 2 ? "#ef4444" : "#eab308";
+          if (x < -140 || x > VIEW_WIDTH + 140 || y < -140 || y > VIEW_HEIGHT + 140) return null;
+          const r = metersToPx(z.radius_meters);
+          const color = z.severity_level >= 2 ? "#dc2626" : "#ca8a04";
           return (
             <g
               key={z.event_id}
@@ -448,18 +608,21 @@ function SvgVectorFallbackMap({
                 cy={y}
                 r={r}
                 fill={color}
-                fillOpacity={0.28}
+                fillOpacity={0.32}
                 stroke={color}
-                strokeWidth={2}
+                strokeWidth={2.5}
               />
-              <circle cx={x} cy={y} r={7} fill={color} stroke="#ffffff" strokeWidth={2} />
+              <circle cx={x} cy={y} r={8} fill={color} stroke="#ffffff" strokeWidth={2} />
               <text
                 x={x}
                 y={y - r - 6}
                 textAnchor="middle"
-                fill="#fca5a5"
+                fill={isLightTiles ? "#7f1d1d" : "#fecaca"}
+                stroke={isLightTiles ? "#ffffff" : "#0f172a"}
+                strokeWidth={3}
+                paintOrder="stroke"
                 fontSize={11}
-                fontWeight={600}
+                fontWeight={700}
               >
                 {z.location_name || z.event_id} (M{z.severity_level})
               </text>
@@ -472,25 +635,36 @@ function SvgVectorFallbackMap({
           <polyline
             points={baselinePointsAttr}
             fill="none"
-            stroke="#ef4444"
-            strokeWidth={3.5}
+            stroke="#dc2626"
+            strokeWidth={4}
             strokeDasharray="10 7"
             strokeLinecap="round"
-            strokeOpacity={0.92}
+            strokeOpacity={0.95}
           />
         )}
 
         {/* Active Safe / Detour Route */}
         {activePointsAttr && (
-          <polyline
-            points={activePointsAttr}
-            fill="none"
-            stroke={routeResult?.rerouted ? "#22c55e" : "#3b82f6"}
-            strokeWidth={5.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeOpacity={0.95}
-          />
+          <>
+            <polyline
+              points={activePointsAttr}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={8.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeOpacity={0.85}
+            />
+            <polyline
+              points={activePointsAttr}
+              fill="none"
+              stroke={routeResult?.rerouted ? "#16a34a" : "#2563eb"}
+              strokeWidth={5.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeOpacity={0.98}
+            />
+          </>
         )}
 
         {/* Detour Via Waypoints */}
@@ -499,14 +673,14 @@ function SvgVectorFallbackMap({
           return (
             <g key={`via-${idx}`}>
               <rect
-                x={x - 5}
-                y={y - 5}
-                width={10}
-                height={10}
+                x={x - 6}
+                y={y - 6}
+                width={12}
+                height={12}
                 transform={`rotate(45 ${x} ${y})`}
-                fill="#22c55e"
+                fill="#16a34a"
                 stroke="#ffffff"
-                strokeWidth={1.5}
+                strokeWidth={2}
               />
             </g>
           );
@@ -515,7 +689,7 @@ function SvgVectorFallbackMap({
         {/* Cameras */}
         {cameras.map((cam) => {
           const { x, y } = toXY(cam);
-          if (x < -40 || x > SVG_WIDTH + 40 || y < -40 || y > SVG_HEIGHT + 40) return null;
+          if (x < -40 || x > VIEW_WIDTH + 40 || y < -40 || y > VIEW_HEIGHT + 40) return null;
           return (
             <g
               key={cam.camera_id}
@@ -530,8 +704,8 @@ function SvgVectorFallbackMap({
                 });
               }}
             >
-              <circle cx={x} cy={y} r={8} fill="#0284c7" stroke="#ffffff" strokeWidth={2} />
-              <text x={x} y={y + 3.5} textAnchor="middle" fill="#ffffff" fontSize={9} fontWeight={700}>
+              <circle cx={x} cy={y} r={9} fill="#0284c7" stroke="#ffffff" strokeWidth={2.5} />
+              <text x={x} y={y + 3.5} textAnchor="middle" fill="#ffffff" fontSize={10} fontWeight={700}>
                 C
               </text>
             </g>
@@ -540,30 +714,30 @@ function SvgVectorFallbackMap({
 
         {/* Origin A & Destination B */}
         <g>
-          <circle cx={originXY.x} cy={originXY.y} r={11} fill="#2563eb" stroke="#ffffff" strokeWidth={2.5} />
+          <circle cx={originXY.x} cy={originXY.y} r={12} fill="#2563eb" stroke="#ffffff" strokeWidth={2.5} />
           <text x={originXY.x} y={originXY.y + 4} textAnchor="middle" fill="#ffffff" fontSize={11} fontWeight={700}>
             A
           </text>
         </g>
         <g>
-          <circle cx={destXY.x} cy={destXY.y} r={11} fill="#16a34a" stroke="#ffffff" strokeWidth={2.5} />
+          <circle cx={destXY.x} cy={destXY.y} r={12} fill="#16a34a" stroke="#ffffff" strokeWidth={2.5} />
           <text x={destXY.x} y={destXY.y + 4} textAnchor="middle" fill="#ffffff" fontSize={11} fontWeight={700}>
             B
           </text>
         </g>
       </svg>
 
-      {/* Legend */}
+      {/* Legend & OSM attribution */}
       <div
         style={{
           position: "absolute",
           left: "0.85rem",
           bottom: "0.85rem",
           zIndex: 10,
-          background: "rgba(15, 23, 42, 0.9)",
+          background: "rgba(15, 23, 42, 0.92)",
           border: "1px solid #334155",
           borderRadius: "8px",
-          padding: "0.5rem 0.75rem",
+          padding: "0.45rem 0.75rem",
           fontSize: "0.72rem",
           color: "#cbd5e1",
           display: "flex",
@@ -580,6 +754,7 @@ function SvgVectorFallbackMap({
         </span>
         <span>🔴 Vùng ngập (bấm xem AI)</span>
         <span>🔹 Camera (C)</span>
+        <span style={{ color: "#94a3b8" }}>© OpenStreetMap contributors • Esri</span>
       </div>
     </div>
   );
@@ -605,8 +780,39 @@ export function FloodMap(props: FloodMapProps) {
     pollingCameraId
   } = props;
 
+  const [preferFallbackMap, setPreferFallbackMap] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+  const googleTilesLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!envConfig.hasGoogleMapsKey || preferFallbackMap) return;
+    googleTilesLoadedRef.current = false;
+
+    const win = window as unknown as { gm_authFailure?: () => void };
+    const prevAuthFailure = win.gm_authFailure;
+    win.gm_authFailure = () => {
+      setFallbackReason("Google Maps API key lỗi xác thực/Billing — tự động chuyển sang OSM Street View");
+      setPreferFallbackMap(true);
+      prevAuthFailure?.();
+    };
+
+    const timer = window.setTimeout(() => {
+      if (!googleTilesLoadedRef.current) {
+        setFallbackReason("Google Maps không tải được tile — tự động chuyển sang OSM Street View");
+        setPreferFallbackMap(true);
+      }
+    }, 5500);
+
+    return () => {
+      win.gm_authFailure = prevAuthFailure;
+      window.clearTimeout(timer);
+    };
+  }, [preferFallbackMap]);
+
+  const useOsmFallback = !envConfig.hasGoogleMapsKey || preferFallbackMap;
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", minHeight: "420px" }}>
       {clickMode && (
         <div
           style={{
@@ -628,8 +834,8 @@ export function FloodMap(props: FloodMapProps) {
         </div>
       )}
 
-      {!envConfig.hasGoogleMapsKey ? (
-        <SvgVectorFallbackMap
+      {useOsmFallback ? (
+        <InteractiveOsmFallbackMap
           origin={origin}
           destination={destination}
           clickMode={clickMode}
@@ -641,76 +847,124 @@ export function FloodMap(props: FloodMapProps) {
           showHeatmap={showHeatmap}
           onSelectEntity={onSelectEntity}
           pollResultsByCamera={pollResultsByCamera}
+          fallbackReason={fallbackReason}
+          onRetryGoogleMaps={
+            envConfig.hasGoogleMapsKey
+              ? () => {
+                  setFallbackReason(null);
+                  setPreferFallbackMap(false);
+                }
+              : undefined
+          }
         />
       ) : (
-        <APIProvider apiKey={envConfig.googleMapsApiKey} libraries={["geometry", "places"]}>
-          <Map
-            defaultCenter={origin}
-            defaultZoom={14}
-            mapId="DEMO_MAP_ID"
-            style={{ width: "100%", height: "100%" }}
-            onClick={(ev) => {
-              if (!clickMode || !ev.detail.latLng) return;
-              onSelectCoordinate(clickMode, {
-                lat: ev.detail.latLng.lat,
-                lng: ev.detail.latLng.lng
-              });
+        <div style={{ position: "absolute", inset: 0 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setFallbackReason("Chế độ xem OpenStreetMap theo yêu cầu");
+              setPreferFallbackMap(true);
+            }}
+            style={{
+              position: "absolute",
+              top: "0.85rem",
+              right: "0.85rem",
+              zIndex: 15,
+              padding: "0.38rem 0.65rem",
+              borderRadius: "6px",
+              border: "1px solid #334155",
+              background: "rgba(15, 23, 42, 0.9)",
+              color: "#e2e8f0",
+              cursor: "pointer",
+              fontSize: "0.75rem"
             }}
           >
-            <MapCameraController origin={origin} destination={destination} routeResult={routeResult} />
-            <FloodCirclesLayer
-              zones={zones}
-              onSelectZone={(z) => onSelectEntity({ kind: "zone", zone: z })}
-            />
-            <RoutePolylineLayer routeResult={routeResult} />
-            <HeatmapOverlay visible={showHeatmap} points={heatmapPoints} />
+            Đổi sang OSM Street Map
+          </button>
 
-            <AdvancedMarker position={origin} title="Điểm đi (A)">
-              <Pin background="#2563eb" borderColor="#ffffff" glyphColor="#ffffff" glyph="A" />
-            </AdvancedMarker>
-            <AdvancedMarker position={destination} title="Điểm đến (B)">
-              <Pin background="#16a34a" borderColor="#ffffff" glyphColor="#ffffff" glyph="B" />
-            </AdvancedMarker>
+          <APIProvider
+            apiKey={envConfig.googleMapsApiKey}
+            libraries={["geometry", "places"]}
+            onError={() => {
+              setFallbackReason("Không nạp được Google Maps JS SDK — chuyển sang OSM Street View");
+              setPreferFallbackMap(true);
+            }}
+          >
+            <Map
+              defaultCenter={origin}
+              defaultZoom={14}
+              mapId="DEMO_MAP_ID"
+              style={{ width: "100%", height: "100%" }}
+              onClick={(ev) => {
+                if (!clickMode || !ev.detail.latLng) return;
+                onSelectCoordinate(clickMode, {
+                  lat: ev.detail.latLng.lat,
+                  lng: ev.detail.latLng.lng
+                });
+              }}
+            >
+              <MapCameraController
+                origin={origin}
+                destination={destination}
+                routeResult={routeResult}
+                onTilesReady={() => {
+                  googleTilesLoadedRef.current = true;
+                }}
+              />
+              <FloodCirclesLayer
+                zones={zones}
+                onSelectZone={(z) => onSelectEntity({ kind: "zone", zone: z })}
+              />
+              <RoutePolylineLayer routeResult={routeResult} />
+              <HeatmapOverlay visible={showHeatmap} points={heatmapPoints} />
 
-            {routeResult?.detour_waypoints_used?.map((wp, idx) => (
-              <AdvancedMarker key={`detour-${idx}`} position={wp} title={`Điểm vòng an toàn #${idx + 1}`}>
-                <Pin background="#22c55e" borderColor="#052e16" glyphColor="#ffffff" scale={0.78} />
+              <AdvancedMarker position={origin} title="Điểm đi (A)">
+                <Pin background="#2563eb" borderColor="#ffffff" glyphColor="#ffffff" glyph="A" />
               </AdvancedMarker>
-            ))}
-
-            {zones.map((z) => (
-              <AdvancedMarker
-                key={z.event_id}
-                position={{ lat: z.lat, lng: z.lng }}
-                title={`${z.location_name || z.event_id} (Mức ${z.severity_level})`}
-                onClick={() => onSelectEntity({ kind: "zone", zone: z })}
-              >
-                <Pin
-                  background={z.severity_level >= 2 ? "#ef4444" : "#eab308"}
-                  borderColor="#ffffff"
-                  glyphColor="#ffffff"
-                />
+              <AdvancedMarker position={destination} title="Điểm đến (B)">
+                <Pin background="#16a34a" borderColor="#ffffff" glyphColor="#ffffff" glyph="B" />
               </AdvancedMarker>
-            ))}
 
-            {cameras.map((cam) => (
-              <AdvancedMarker
-                key={cam.camera_id}
-                position={{ lat: cam.lat, lng: cam.lng }}
-                title={`Camera: ${cam.name}`}
-                onClick={() =>
-                  onSelectEntity({
-                    kind: "camera",
-                    camera: cam,
-                    pollResult: pollResultsByCamera[cam.camera_id]
-                  })
-                }
-              >
-                <Pin background="#0284c7" borderColor="#ffffff" glyphColor="#ffffff" glyph="C" />
-              </AdvancedMarker>
-            ))}
-          </Map>
-        </APIProvider>
+              {routeResult?.detour_waypoints_used?.map((wp, idx) => (
+                <AdvancedMarker key={`detour-${idx}`} position={wp} title={`Điểm vòng an toàn #${idx + 1}`}>
+                  <Pin background="#22c55e" borderColor="#052e16" glyphColor="#ffffff" scale={0.78} />
+                </AdvancedMarker>
+              ))}
+
+              {zones.map((z) => (
+                <AdvancedMarker
+                  key={z.event_id}
+                  position={{ lat: z.lat, lng: z.lng }}
+                  title={`${z.location_name || z.event_id} (Mức ${z.severity_level})`}
+                  onClick={() => onSelectEntity({ kind: "zone", zone: z })}
+                >
+                  <Pin
+                    background={z.severity_level >= 2 ? "#ef4444" : "#eab308"}
+                    borderColor="#ffffff"
+                    glyphColor="#ffffff"
+                  />
+                </AdvancedMarker>
+              ))}
+
+              {cameras.map((cam) => (
+                <AdvancedMarker
+                  key={cam.camera_id}
+                  position={{ lat: cam.lat, lng: cam.lng }}
+                  title={`Camera: ${cam.name}`}
+                  onClick={() =>
+                    onSelectEntity({
+                      kind: "camera",
+                      camera: cam,
+                      pollResult: pollResultsByCamera[cam.camera_id]
+                    })
+                  }
+                >
+                  <Pin background="#0284c7" borderColor="#ffffff" glyphColor="#ffffff" glyph="C" />
+                </AdvancedMarker>
+              ))}
+            </Map>
+          </APIProvider>
+        </div>
       )}
 
       <FloodInspectorCard

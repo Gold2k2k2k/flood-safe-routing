@@ -84,6 +84,7 @@ export function App() {
   const [clickMode, setClickMode] = useState<MapClickMode>(null);
 
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [zonesLoaded, setZonesLoaded] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
@@ -126,6 +127,7 @@ export function App() {
       setZones(z);
       setCameras(cams);
       setHeatmapPoints(heat);
+      setZonesLoaded(true);
       setStatusError(null);
     } catch (err) {
       setStatusError(
@@ -138,6 +140,12 @@ export function App() {
     void refreshZonesAndCameras();
     return subscribeToActiveFloodZones(setZones, (err) => setStatusError(err.message));
   }, [refreshZonesAndCameras]);
+
+  // Compute safe route automatically once zones are loaded and whenever A/B waypoints change
+  useEffect(() => {
+    if (!zonesLoaded) return;
+    void computeRoute(false);
+  }, [zonesLoaded, computeRoute]);
 
   const handleSelectPreset = (preset: RoutePreset) => {
     setSelectedPresetId(preset.id);
@@ -596,7 +604,7 @@ export function App() {
         })}
       </aside>
 
-      <main style={{ background: "#0f172a", height: "100%", overflow: "hidden" }}>
+      <main style={{ background: "#0f172a", height: "100%", minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
         <FloodMap
           origin={origin}
           destination={destination}
