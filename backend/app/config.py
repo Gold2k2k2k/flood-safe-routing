@@ -51,6 +51,10 @@ class Settings:
         return os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./serviceAccountKey.json")
 
     @property
+    def FIREBASE_SERVICE_ACCOUNT_JSON(self) -> str:
+        return os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    @property
     def FLOOD_ALERT_THRESHOLD(self) -> float:
         return float(os.getenv("FLOOD_ALERT_THRESHOLD", "0.65"))
 
@@ -79,9 +83,10 @@ class Settings:
 
     @property
     def firebase_configured(self) -> bool:
-        return self.resolved_credentials_path.exists() and _has_real_value(
-            self.FIREBASE_PROJECT_ID
+        has_creds = self.resolved_credentials_path.exists() or _has_real_value(
+            self.FIREBASE_SERVICE_ACCOUNT_JSON
         )
+        return has_creds and _has_real_value(self.FIREBASE_PROJECT_ID)
 
 
 settings = Settings()

@@ -51,4 +51,32 @@ npm run dev
 | **0:00 – 0:40** | Mở giao diện **Flood-Safe Routing**, chọn điểm đi từ **Quận 1** về **Thảo Điền (TP.HCM)** cho xe máy (`TWO_WHEELER`). Tuyến đường ban đầu đi qua đường **Nguyễn Hữu Cảnh** đang màu xanh thông suốt. | *"Hiện tại các ứng dụng bản đồ thông thường dẫn tài xế đi thẳng vào Nguyễn Hữu Cảnh vì chưa phát hiện kẹt xe."* |
 | **0:40 – 1:40** | Kích hoạt luồng frame camera thực tế lúc mưa lớn tại nút giao Nguyễn Hữu Cảnh (hoặc mời 1 thành viên chụp/upload ảnh ngập thực tế qua nút **Báo ngập Crowdsourcing**). Hiển thị kết quả JSON trực tiếp từ **Gemini 3.8 Flash Vision**. | *"Không cần con người canh màn hình camera: Gemini 3.8 Flash tự động đọc frame ảnh, nhận diện nước đã ngập nửa bánh xe máy (`severity_level: 2`) và kết luận xe máy không thể đi qua."* |
 | **1:40 – 2:20** | Ngay khi Gemini trả kết quả, **Firebase Firestore** đồng bộ cảnh báo đỏ lên bản đồ. Lộ trình của tài xế lập tức chuyển từ đường cũ (nét đứt cảnh báo) sang **tuyến đường mới màu xanh lá** né hoàn toàn vùng ngập nhờ **Google Routes API**. | *"Chỉ trong chưa đầy 2 giây, toàn bộ tài xế trong khu vực nhận cảnh báo đỏ và được tự động bẻ hướng (Dynamic Rerouting) sang lộ trình an toàn, cứu xe khỏi chết máy."* |
-| **2:20 – 3:00** | Bật công tắc **Flood Frequency Heatmap (Dành cho Quản lý Đô thị)** để hiển thị bản đồ nhiệt tần suất ngập 30 ngày qua. | *"Không chỉ cứu từng chiếc xe máy hôm nay, dữ liệu tích lũy tạo nên Bản đồ nhiệt tần suất ngập — tài sản dữ liệu vô giá giúp cơ quan quản lý đô thị quy hoạch và cải tạo hạ tầng thoát nước."* |
+| **2:20 – 3:00** | Bật công tắc **Bật Heatmap 30N** để hiển thị bản đồ nhiệt tần suất ngập 30 ngày qua cùng thẻ **Thống kê Ngập 30 Ngày (B2G Hạ tầng)** và thử bấm **Giải tỏa điểm ngập** / **Reset**. | *"Không chỉ cứu từng chiếc xe máy hôm nay, dữ liệu tích lũy tạo nên Bản đồ nhiệt tần suất ngập & Top 3 điểm nóng khơi thông — tài sản dữ liệu giúp cơ quan quản lý đô thị quy hoạch và cải tạo hạ tầng thoát nước."* |
+
+---
+
+## 3. Hướng Dẫn Triển Khai Nhanh (Vercel Multi-Service & Google Cloud Run)
+
+### Phương án A: Vercel Multi-Service (`vercel.json`)
+`vercel.json` đã cấu hình sẵn 3 service (`frontend` Vite static build, `backend` FastAPI tại `/api/*`, và `ai-vision` internal service):
+1. Import repository vào Vercel (chọn **Root Directory** là `.` — mặc định của repo).
+2. Không cần sửa Build Command/Output Directory (Vercel tự đọc `vercel.json`).
+3. Khai báo Environment Variables trong Vercel Project Settings:
+   - Demo nhanh (Mock Fallback): `USE_MOCK_FALLBACK=true`
+   - Chạy Live API thật:
+     - `USE_MOCK_FALLBACK=false`
+     - `GEMINI_API_KEY=<key>`
+     - `GOOGLE_MAPS_API_KEY=<key>`
+     - `VITE_GOOGLE_MAPS_API_KEY=<key>` (tùy chọn; nếu bỏ trống UI tự dùng Interactive SVG Vector Map)
+     - `FIREBASE_PROJECT_ID=<project_id>` và `FIREBASE_SERVICE_ACCOUNT_JSON=<nội dung 1 dòng JSON service account>`
+     - `VITE_FIREBASE_*` (nếu muốn frontend dùng Firestore `onSnapshot` trực tiếp; nếu không, frontend tự fallback REST polling `/api/flood-zones` mỗi 4s)
+
+### Phương án B: Google Cloud Run (Container `Dockerfile` gốc)
+```bash
+gcloud run deploy flood-safe-routing \
+  --source . \
+  --region asia-southeast1 \
+  --allow-unauthenticated \
+  --set-env-vars USE_MOCK_FALLBACK=true
+```
+(Có thể thay `USE_MOCK_FALLBACK=false` kèm các key thật khi chạy Live Google Tech Stack.)

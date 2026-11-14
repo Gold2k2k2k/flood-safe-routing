@@ -9,6 +9,7 @@ import json
 import logging
 import math
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from ..config import ROOT_DIR, settings
@@ -17,6 +18,114 @@ from ..schemas import CameraItem, FloodZoneItem
 logger = logging.getLogger(__name__)
 _IN_MEMORY_ZONES: list[FloodZoneItem] | None = None
 _IN_MEMORY_HEATMAP: list[dict[str, Any]] | None = None
+
+
+def _resolve_data_file(filename: str) -> Path | None:
+    """Resolve sample data file across local repo root, CWD, or serverless bundle."""
+    candidates = [
+        ROOT_DIR / "data" / filename,
+        Path.cwd() / "data" / filename,
+        Path(__file__).resolve().parents[2] / "data" / filename,
+    ]
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def _embedded_fallback_zones() -> list[FloodZoneItem]:
+    return [
+        FloodZoneItem(
+            event_id="evt_001",
+            source="camera_ai",
+            camera_id="cam_hcm_001",
+            location_name="Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+            lat=10.7858,
+            lng=106.7082,
+            radius_meters=120.0,
+            severity_level=2,
+            visual_cue="Nước ngập quá mép lề đường và chạm nửa bánh xe máy",
+            estimated_depth_cm="20-35",
+            passable_for_motorbike=False,
+            confidence=0.91,
+            vision_model=settings.GEMINI_MODEL,
+            status="active",
+            updated_at="2026-11-14T08:00:00+07:00",
+        ),
+        FloodZoneItem(
+            event_id="evt_hcm_002",
+            source="camera_ai",
+            camera_id="cam_hcm_002",
+            location_name="Đường Quốc Hương - Xuân Thủy (Thảo Điền)",
+            lat=10.8032,
+            lng=106.7280,
+            radius_meters=130.0,
+            severity_level=3,
+            visual_cue="Nước ngập sâu lút quá nửa bánh xe máy, chạm ống xả và lốc máy",
+            estimated_depth_cm=">35",
+            passable_for_motorbike=False,
+            confidence=0.94,
+            vision_model=settings.GEMINI_MODEL,
+            status="active",
+            updated_at="2026-11-14T08:30:00+07:00",
+        ),
+    ]
+
+
+def _embedded_fallback_cameras() -> list[CameraItem]:
+    return [
+        CameraItem(
+            camera_id="cam_hcm_001",
+            name="Ngã tư Nguyễn Hữu Cảnh - Tôn Đức Thắng",
+            city="TP.HCM",
+            source="public_traffic_camera",
+            feed_url="https://giaothong.hochiminhcity.gov.vn",
+            lat=10.7858,
+            lng=106.7082,
+            road_segment_id="seg_hcm_nhc_01",
+            local_image_path="data/sample_frames/level_2_moderate.jpg",
+            default_severity_hint=2,
+        ),
+        CameraItem(
+            camera_id="cam_hcm_002",
+            name="Đường Quốc Hương - Xuân Thủy (Thảo Điền)",
+            city="TP.HCM",
+            source="public_traffic_camera",
+            feed_url="https://giaothong.hochiminhcity.gov.vn",
+            lat=10.8032,
+            lng=106.7280,
+            road_segment_id="seg_hcm_qh_01",
+            local_image_path="data/sample_frames/level_3_severe.jpg",
+            default_severity_hint=3,
+        ),
+    ]
+
+
+def _embedded_fallback_heatmap() -> list[dict[str, Any]]:
+    return [
+        {
+            "zone_id": "hcm_binh_thanh_nhc",
+            "city": "TP.HCM",
+            "district": "Bình Thạnh (Nguyễn Hữu Cảnh)",
+            "lat": 10.7858,
+            "lng": 106.7082,
+            "flood_frequency_30d": 16,
+            "avg_severity": 2.4,
+            "weight": 38.4,
+            "peak_trigger": "high_tide_and_rain",
+        },
+        {
+            "zone_id": "hcm_thu_duc_quoc_huong",
+            "city": "TP.HCM",
+            "district": "TP. Thủ Đức (Quốc Hương - Thảo Điền)",
+            "lat": 10.8032,
+            "lng": 106.7280,
+            "flood_frequency_30d": 19,
+            "avg_severity": 2.6,
+            "weight": 49.4,
+            "peak_trigger": "high_tide_and_rain",
+        },
+    ]
 
 
 def _approx_distance_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -58,7 +167,11 @@ def _get_firestore_client() -> Any:
     from firebase_admin import credentials, firestore
 
     if not firebase_admin._apps:
-        cred = credentials.Certificate(str(settings.resolved_credentials_path))
+        if settings.FIREBASE_SERVICE_ACCOUNT_JSON:
+            cred_info = json.loads(settings.FIREBASE_SERVICE_ACCOUNT_JSON)
+            cred = credentials.Certificate(cred_info)
+        else:
+            cred = credentials.Certificate(str(settings.resolved_credentials_path))
         firebase_admin.initialize_app(cred)
     return firestore.client()
 
@@ -77,9 +190,10 @@ def _is_not_expired(ttl_expires_at: str | None) -> bool:
 
 
 def _load_sample_flood_zones() -> list[FloodZoneItem]:
-    geojson_path = ROOT_DIR / "data" / "flood_events.sample.geojson"
-    if not geojson_path.exists():
-        return []
+    geojson_path = _resolve_data_file("flood_events.sample.geojson")
+    if geojson_path is None:
+        logger.warning("flood_events.sample.geojson not found; using embedded fallback seed zones.")
+        return _embedded_fallback_zones()
     raw = json.loads(geojson_path.read_text(encoding="utf-8"))
     zones: list[FloodZoneItem] = []
     for feat in raw.get("features", []):
@@ -116,9 +230,10 @@ def _load_sample_flood_zones() -> list[FloodZoneItem]:
 
 
 def _load_sample_heatmap() -> list[dict[str, Any]]:
-    heatmap_path = ROOT_DIR / "data" / "heatmap_history.sample.json"
-    if not heatmap_path.exists():
-        return []
+    heatmap_path = _resolve_data_file("heatmap_history.sample.json")
+    if heatmap_path is None:
+        logger.warning("heatmap_history.sample.json not found; using embedded fallback heatmap.")
+        return _embedded_fallback_heatmap()
     items = json.loads(heatmap_path.read_text(encoding="utf-8"))
     for item in items:
         freq = float(item.get("flood_frequency_30d", 1))
@@ -331,9 +446,10 @@ def get_cameras() -> list[CameraItem]:
             if not settings.USE_MOCK_FALLBACK:
                 raise RuntimeError(f"Firestore cameras lookup failed: {exc}") from exc
 
-    cameras_path = ROOT_DIR / "data" / "cameras.sample.json"
-    if not cameras_path.exists():
-        return []
+    cameras_path = _resolve_data_file("cameras.sample.json")
+    if cameras_path is None:
+        logger.warning("cameras.sample.json not found; using embedded fallback cameras.")
+        return _embedded_fallback_cameras()
     raw = json.loads(cameras_path.read_text(encoding="utf-8"))
     return [CameraItem(**item) for item in raw]
 

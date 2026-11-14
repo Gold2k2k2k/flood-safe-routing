@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+serviceAccountKey.json
+**/__pycache__
+**/*.pyc
+.venv
+venv
+frontend/node_modules
+frontend/dist
+tests
+scripts
+docs
+*.md

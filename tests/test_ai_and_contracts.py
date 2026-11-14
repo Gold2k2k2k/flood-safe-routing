@@ -6,11 +6,15 @@ Run from repo root:
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
 import os
 import sys
 import unittest
 from pathlib import Path
+
+import httpx
 from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,8 +25,9 @@ from fastapi.testclient import TestClient
 from src.analyzer import analyze_flood_image, preprocess_image_bytes
 from src.camera_extractor import clear_camera_frame_cache, compute_frame_delta
 from src.schemas import FloodAnalysisResult
+from app.config import settings
 from app.main import app
-from app.services import firebase_service
+from app.services import ai_vision_client, firebase_service
 
 
 def _png_bytes(width: int, height: int, color: tuple[int, int, int]) -> bytes:
@@ -35,8 +40,12 @@ class TestAIVisionAndContracts(unittest.TestCase):
     def setUp(self) -> None:
         self._prev_key = os.environ.get("GEMINI_API_KEY")
         self._prev_mock = os.environ.get("USE_MOCK_FALLBACK")
+        self._prev_vision_url = os.environ.get("AI_VISION_URL")
+        self._prev_fb_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        self._prev_fb_proj = os.environ.get("FIREBASE_PROJECT_ID")
         os.environ["USE_MOCK_FALLBACK"] = "true"
         os.environ["GEMINI_API_KEY"] = "your_gemini_api_key"
+        os.environ.pop("AI_VISION_URL", None)
         firebase_service._IN_MEMORY_ZONES = None
         firebase_service._IN_MEMORY_HEATMAP = None
         clear_camera_frame_cache()
@@ -53,6 +62,18 @@ class TestAIVisionAndContracts(unittest.TestCase):
             os.environ.pop("USE_MOCK_FALLBACK", None)
         else:
             os.environ["USE_MOCK_FALLBACK"] = self._prev_mock
+        if self._prev_vision_url is None:
+            os.environ.pop("AI_VISION_URL", None)
+        else:
+            os.environ["AI_VISION_URL"] = self._prev_vision_url
+        if self._prev_fb_json is None:
+            os.environ.pop("FIREBASE_SERVICE_ACCOUNT_JSON", None)
+        else:
+            os.environ["FIREBASE_SERVICE_ACCOUNT_JSON"] = self._prev_fb_json
+        if self._prev_fb_proj is None:
+            os.environ.pop("FIREBASE_PROJECT_ID", None)
+        else:
+            os.environ["FIREBASE_PROJECT_ID"] = self._prev_fb_proj
 
     def test_mock_analyzer_conforms_to_schema_across_levels(self) -> None:
         safe = analyze_flood_image(b"fake-bytes", mock_severity_hint=0)
@@ -223,6 +244,78 @@ class TestAIVisionAndContracts(unittest.TestCase):
             json={"lat": 10.78, "lng": 106.70, "mock_severity_hint": 2},
         )
         self.assertEqual(resp.status_code, 503)
+
+    def test_ai_vision_client_bound_http_transport(self) -> None:
+        os.environ["AI_VISION_URL"] = "http://ai-vision.internal"
+        seen_paths: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen_paths.append(request.url.path)
+            payload = {
+                "flood_detected": True,
+                "severity_level": 2,
+                "visual_cue": "Bound AI Vision service verdict",
+                "estimated_depth_cm": "15-30 cm",
+                "passable_for_motorbike": False,
+                "confidence": 0.91,
+                "vision_model": "gemini-3.8-flash",
+                "analyzed_at": "2026-11-14T10:00:00Z",
+            }
+            if request.url.path == "/analyze":
+                return httpx.Response(200, json=payload)
+            if request.url.path == "/cameras/poll-item":
+                body = json.loads(request.content.decode("utf-8"))
+                self.assertEqual(body["camera"]["camera_id"], "cam_test")
+                return httpx.Response(
+                    200,
+                    json={
+                        "camera_id": "cam_test",
+                        "frame_source": "mock",
+                        "analysis": payload,
+                        "frame_delta_skipped": False,
+                    },
+                )
+            return httpx.Response(404)
+
+        transport = httpx.MockTransport(handler)
+        analyzed = asyncio.run(
+            ai_vision_client.analyze_flood_image_bound(
+                image_bytes=_png_bytes(16, 16, (10, 20, 30)),
+                http_transport=transport,
+            )
+        )
+        self.assertEqual(analyzed.severity_level, 2)
+        self.assertEqual(analyzed.visual_cue, "Bound AI Vision service verdict")
+
+        frame_source, polled_analysis, delta_skipped = asyncio.run(
+            ai_vision_client.poll_camera_frame_bound(
+                camera_meta={"camera_id": "cam_test", "source": "mock"},
+                effective_hint=2,
+                http_transport=transport,
+            )
+        )
+        self.assertEqual(frame_source, "mock")
+        self.assertEqual(polled_analysis.severity_level, 2)
+        self.assertFalse(delta_skipped)
+        self.assertEqual(seen_paths, ["/analyze", "/cameras/poll-item"])
+
+    def test_ai_vision_client_503_propagates_runtime_error(self) -> None:
+        os.environ["AI_VISION_URL"] = "http://ai-vision.internal"
+        transport = httpx.MockTransport(
+            lambda _req: httpx.Response(503, json={"detail": "GEMINI_API_KEY missing"})
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(ai_vision_client.analyze_flood_image_bound(http_transport=transport))
+        self.assertIn("GEMINI_API_KEY", str(ctx.exception))
+
+    def test_firebase_service_account_json_env_config(self) -> None:
+        os.environ.pop("FIREBASE_SERVICE_ACCOUNT_JSON", None)
+        os.environ["FIREBASE_PROJECT_ID"] = "flood-safe-prod"
+        if not settings.resolved_credentials_path.exists():
+            self.assertFalse(settings.firebase_configured)
+
+        os.environ["FIREBASE_SERVICE_ACCOUNT_JSON"] = '{"type":"service_account","project_id":"flood-safe-prod"}'
+        self.assertTrue(settings.firebase_configured)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,12 @@ const isRealValue = (val?: string): boolean => {
   return !lower.startsWith("your_") && !lower.includes("placeholder");
 };
 
+const rawApiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.PROD ? "" : "http://localhost:8000");
+
 export const envConfig = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000",
+  apiBaseUrl: rawApiBaseUrl.replace(/\/+$/, ""),
   googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
   useMockFallback:
     (import.meta.env.VITE_USE_MOCK_FALLBACK ?? "true").toString().toLowerCase() === "true",

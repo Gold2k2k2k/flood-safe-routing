@@ -66,3 +66,27 @@
   - `python scripts/repro_routing.py`, `repro_gemini_vision.py`, `repro_camera_fetch.py` -> **PASS**.
   - `cd frontend && npm run build` (`tsc -b && vite build`) -> **PASS** (`0` lỗi TypeScript/Vite).
 - **Giai đoạn tiếp theo:** Bắt đầu **Phase 3** (Giao diện bản đồ Before/After Polyline, chọn điểm Đi/Đến & Preset kịch bản, Thẻ AI Vision Inspector, và Bản đồ Vector tương tác dự phòng).
+
+---
+
+## 5. Cập Nhật Thực Thi: Hoàn Thành Phase 3, Phase 4, Phase 5 & Sẵn Sàng Deploy (`2026-11-14`)
+
+- **Thời điểm cập nhật:** `2026-11-14 11:05 (+07:00)`
+- **Phạm vi hoàn thành:** Hoàn thành toàn bộ **Phase 3 (Interactive Map & AI Inspector)**, **Phase 4 (Crowdsourcing GPS, Auto-Reroute Alert, B2G Analytics)**, và **Phase 5 (Deployment Readiness, Unit Tests & Verification)** theo [implementation_plan_fast_track.md](file:///C:/Users/Long/.gemini/antigravity/brain/7fc6fb50-38ef-48a4-8298-8153688b1553/implementation_plan_fast_track.md).
+- **Chi tiết hạng mục đã hoàn thiện:**
+  1. **Phase 3 — Giao diện Bản đồ & AI Vision Inspector (`frontend/`):**
+     - Nâng cấp `frontend/src/components/FloodMap.tsx`: vẽ song song tuyến đường gốc bị ngập (**đỏ nét đứt**) và tuyến vòng an toàn (**xanh lá** kèm các điểm `detour_waypoints_used`, hoặc xanh dương nếu tuyến thông suốt); bổ sung **Interactive SVG Vector Fallback Map** (zoom cục bộ theo cụm đô thị, grid đường phố, heatmap radial blobs, chọn điểm A/B bằng click map) khi thiếu `VITE_GOOGLE_MAPS_API_KEY`.
+     - Tạo `frontend/src/components/FloodInspectorCard.tsx`: hiển thị thanh mức ngập `0..3`, độ sâu ước tính (`cm`), huy hiệu an toàn xe máy, `visual_cue`, độ tin cậy, nút **Giải tỏa điểm ngập** (`DELETE /api/flood-zones/{event_id}`) và nút **Quét AI Camera này**.
+     - Nâng cấp `frontend/src/App.tsx`: bổ sung 3 Route Presets (*Q.1 → Thảo Điền*, *Q.1 → Thủ Đức đa điểm ngập*, *Đà Nẵng*), chế độ chạm bản đồ chọn Điểm A/B, nút **↻ Reset** (`POST /api/flood-zones/reset`).
+  2. **Phase 4 — Crowdsourcing UX, Cảnh Báo Tự Động & B2G Analytics:**
+     - Nâng cấp `frontend/src/components/ReportModal.tsx`: nút **📍 Lấy vị trí GPS của tôi** (`navigator.geolocation`), chip chọn nhanh hotspot, preview ảnh hiện trường, bộ chọn mức ngập Mock Fallback `0..3`, và thẻ kết quả phân tích Gemini.
+     - Nâng cấp `frontend/src/hooks/useAutoReroute.ts` + `App.tsx`: Banner cảnh báo **TỰ ĐỘNG BẺ LÁI REAL-TIME** kèm âm thanh Web Audio API (có nút tắt tiếng) và bảng chênh lệch cự ly / thời gian; thẻ **Thống kê Ngập 30 Ngày (B2G Hạ tầng)** liệt kê Top 3 điểm nóng ưu tiên khơi thông khi bật Heatmap.
+  3. **Phase 5 — Vercel Multi-Service, Google Cloud Run & Kiểm Thử:**
+     - Hoàn thiện `backend/app/main.py` gọi qua `backend/app/services/ai_vision_client.py` (hỗ trợ cả in-process lẫn `AI_VISION_URL` HTTP service binding trên `vercel.json`), cập nhật `frontend/src/config/env.ts` (same-origin `/api/*` trên `PROD`), hỗ trợ `FIREBASE_SERVICE_ACCOUNT_JSON` + embedded seed data fallback trong `backend/app/config.py` và `firebase_service.py`.
+     - Bổ sung `Dockerfile` và `.dockerignore` ở thư mục gốc để deploy 1-lệnh lên **Google Cloud Run**.
+     - Mở rộng `tests/test_ai_and_contracts.py` lên tổng **23 unit tests PASS** (gồm test `httpx.MockTransport` cho `ai_vision_client.py`, truyền lỗi `503`, và cấu hình `FIREBASE_SERVICE_ACCOUNT_JSON`).
+- **Kết quả kiểm chứng tự động mới nhất:**
+  - `python scripts/check_env.py` -> `[READY]`
+  - `python -m unittest discover -s tests -v` -> **23/23 tests PASS**
+  - `python scripts/repro_routing.py`, `repro_gemini_vision.py`, `repro_camera_fetch.py` -> **PASS**
+  - `Set-Location frontend; npm run build` (`tsc -b && vite build`) -> **PASS** (`dist/` built in ~2.2s, `0` lỗi)

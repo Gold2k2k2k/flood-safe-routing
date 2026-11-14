@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from .config import ROOT_DIR, settings
+from .config import settings
 from .schemas import (
     CameraListResponse,
     CameraPollRequest,
@@ -35,6 +34,11 @@ from .schemas import (
     RouteRequest,
     RouteResponse,
 )
+from .services.ai_vision_client import (
+    analyze_flood_image_bound,
+    clear_vision_cache_bound,
+    poll_camera_frame_bound,
+)
 from .services.firebase_service import (
     delete_flood_zone,
     get_active_flood_zones,
@@ -46,20 +50,6 @@ from .services.firebase_service import (
 from .services.routing_service import compute_safe_route
 
 logger = logging.getLogger(__name__)
-
-# Load ai-vision modules cleanly without colliding with generic `src` packages
-_AI_VISION_ROOT = ROOT_DIR / "ai-vision"
-if str(_AI_VISION_ROOT) not in sys.path:
-    sys.path.insert(0, str(_AI_VISION_ROOT))
-
-from src.analyzer import analyze_flood_image_async  # type: ignore
-from src.camera_extractor import (  # type: ignore
-    clear_camera_frame_cache,
-    extract_frame_for_camera,
-    get_cached_camera_analysis,
-    record_camera_frame_analysis,
-    should_skip_unchanged_frame,
-)
 
 app = FastAPI(
     title="Flood-Safe Routing API",
@@ -232,7 +222,7 @@ async def list_flood_zones() -> FloodZonesListResponse:
 @app.post("/api/flood-zones/reset", response_model=FloodZonesListResponse)
 async def reset_flood_zones() -> FloodZonesListResponse:
     """Reset active flood zones, heatmap history, and camera frame cache back to initial sample state."""
-    clear_camera_frame_cache()
+    await clear_vision_cache_bound()
     zones = reset_flood_zones_to_sample()
     return FloodZonesListResponse(count=len(zones), items=zones)
 
@@ -275,7 +265,7 @@ async def remove_flood_zone(event_id: str) -> FloodZoneDeleteResponse:
 async def create_crowdsourced_report(request: Request) -> CrowdsourcingReportResponse:
     payload, img_bytes, mime_type = await _parse_report_payload(request)
 
-    analysis = await analyze_flood_image_async(
+    analysis = await analyze_flood_image_bound(
         image_bytes=img_bytes,
         mime_type=mime_type,
         mock_severity_hint=payload.mock_severity_hint,
@@ -331,42 +321,26 @@ async def poll_cameras(
                 else 2
             )
         )
-        frame_bytes, frame_source = await extract_frame_for_camera(cam.model_dump())
-
-        cached_analysis = get_cached_camera_analysis(cam.camera_id)
-        hint_changed_in_mock = (
-            not settings.gemini_configured
-            and req.mock_severity_hint is not None
-            and cached_analysis is not None
-            and req.mock_severity_hint != cached_analysis.severity_level
+        frame_source, analysis, frame_delta_skipped = await poll_camera_frame_bound(
+            camera_meta=cam.model_dump(),
+            effective_hint=effective_hint,
+            force_refresh=req.force_refresh,
+            hint_explicitly_set=(req.mock_severity_hint is not None),
         )
 
-        if (
-            not req.force_refresh
-            and cached_analysis is not None
-            and not hint_changed_in_mock
-            and should_skip_unchanged_frame(
-                cam.camera_id, frame_bytes, commit_frame=False
-            )
-        ):
-            if cached_analysis.severity_level >= 1:
+        if frame_delta_skipped:
+            if analysis.severity_level >= 1:
                 flooded_count += 1
             results.append(
                 CameraPollResultItem(
                     camera_id=cam.camera_id,
                     frame_source=frame_source,
-                    analysis=cached_analysis.model_dump(),
+                    analysis=analysis.model_dump(),
                     broadcasted_to_firestore=False,
                     frame_delta_skipped=True,
                 )
             )
             continue
-
-        analysis = await analyze_flood_image_async(
-            image_bytes=frame_bytes,
-            mock_severity_hint=effective_hint,
-        )
-        record_camera_frame_analysis(cam.camera_id, frame_bytes, analysis)
 
         broadcasted = False
         event_id = f"cam_evt_{cam.camera_id}"

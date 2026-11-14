@@ -5,9 +5,11 @@
 import { envConfig } from "../config/env";
 import type {
   CameraItem,
+  CameraPollRequest,
   CameraPollResponse,
   CrowdsourcingReportPayload,
   CrowdsourcingReportResponse,
+  FloodZoneDeleteResponse,
   FloodZoneItem,
   HeatmapPoint,
   RouteRequest,
@@ -57,12 +59,34 @@ export async function submitFloodReport(
   return res.json();
 }
 
-export async function triggerCameraPoll(cameraIds?: string[]): Promise<CameraPollResponse> {
+export async function triggerCameraPoll(
+  input?: string[] | CameraPollRequest
+): Promise<CameraPollResponse> {
+  const body: CameraPollRequest = Array.isArray(input)
+    ? { camera_ids: input }
+    : (input ?? {});
   const res = await fetch(`${envConfig.apiBaseUrl}/api/cameras/poll`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(cameraIds ? { camera_ids: cameraIds } : {})
+    body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(`Camera poll failed: ${res.status}`);
   return res.json();
+}
+
+export async function deleteFloodZone(eventId: string): Promise<FloodZoneDeleteResponse> {
+  const res = await fetch(`${envConfig.apiBaseUrl}/api/flood-zones/${encodeURIComponent(eventId)}`, {
+    method: "DELETE"
+  });
+  if (!res.ok) throw new Error(`Failed to resolve flood zone: ${res.status}`);
+  return res.json();
+}
+
+export async function resetFloodZones(): Promise<FloodZoneItem[]> {
+  const res = await fetch(`${envConfig.apiBaseUrl}/api/flood-zones/reset`, {
+    method: "POST"
+  });
+  if (!res.ok) throw new Error(`Failed to reset flood zones: ${res.status}`);
+  const data = await res.json();
+  return data.items ?? [];
 }

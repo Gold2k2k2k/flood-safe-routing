@@ -16,19 +16,33 @@ function buildSevereZonesSignature(zones: FloodZoneItem[]): string {
     .join("|");
 }
 
+export interface AutoRerouteEvent {
+  id: number;
+  triggeredByZoneCount: number;
+  previousDistanceMeters: number | null;
+  previousDurationSeconds: number | null;
+  nextResult: RouteResponse;
+}
+
 export function useAutoReroute({ origin, destination, zones }: UseAutoRerouteParams) {
   const [routeResult, setRouteResult] = useState<RouteResponse | null>(null);
+  const [previousRouteResult, setPreviousRouteResult] = useState<RouteResponse | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [autoRerouteEvent, setAutoRerouteEvent] = useState<AutoRerouteEvent | null>(null);
   const zonesRef = useRef<FloodZoneItem[]>(zones);
+  const routeResultRef = useRef<RouteResponse | null>(null);
   const lastEvaluatedSignatureRef = useRef<string>("");
+  const rerouteCounterRef = useRef(0);
 
   zonesRef.current = zones;
+  routeResultRef.current = routeResult;
 
-  const computeRoute = useCallback(async () => {
+  const computeRoute = useCallback(async (isAutoTriggered = false) => {
     setLoadingRoute(true);
     setRouteError(null);
     lastEvaluatedSignatureRef.current = buildSevereZonesSignature(zonesRef.current);
+    const prevSnapshot = routeResultRef.current;
     try {
       const res = await requestSafeRoute({
         origin,
@@ -36,7 +50,18 @@ export function useAutoReroute({ origin, destination, zones }: UseAutoReroutePar
         travel_mode: "TWO_WHEELER",
         avoid_flood_zones: true
       });
+      setPreviousRouteResult(prevSnapshot);
       setRouteResult(res);
+      if (isAutoTriggered) {
+        rerouteCounterRef.current += 1;
+        setAutoRerouteEvent({
+          id: rerouteCounterRef.current,
+          triggeredByZoneCount: res.avoided_flood_zone_ids.length,
+          previousDistanceMeters: prevSnapshot?.distance_meters ?? null,
+          previousDurationSeconds: prevSnapshot?.duration_seconds ?? null,
+          nextResult: res
+        });
+      }
     } catch (err) {
       setRouteError(err instanceof Error ? err.message : "Không thể tính lộ trình.");
     } finally {
@@ -44,19 +69,26 @@ export function useAutoReroute({ origin, destination, zones }: UseAutoReroutePar
     }
   }, [origin, destination]);
 
+  const dismissAutoRerouteEvent = useCallback(() => {
+    setAutoRerouteEvent(null);
+  }, []);
+
   // Automatically trigger live rerouting whenever the active severe flood zones change
   useEffect(() => {
     if (!routeResult) return;
     const currentSignature = buildSevereZonesSignature(zones);
     if (currentSignature !== lastEvaluatedSignatureRef.current) {
-      void computeRoute();
+      void computeRoute(true);
     }
   }, [zones, routeResult, computeRoute]);
 
   return {
     routeResult,
+    previousRouteResult,
     loadingRoute,
     routeError,
+    autoRerouteEvent,
+    dismissAutoRerouteEvent,
     computeRoute
   };
 }
