@@ -35,6 +35,10 @@ class Settings:
         return os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
     @property
+    def AI_VISION_URL(self) -> str:
+        return os.getenv("AI_VISION_URL", "").strip()
+
+    @property
     def GOOGLE_MAPS_API_KEY(self) -> str:
         return os.getenv("GOOGLE_MAPS_API_KEY", "")
 
